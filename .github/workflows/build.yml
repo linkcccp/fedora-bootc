@@ -1,0 +1,183 @@
+name: Build bootc image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Containerfile
+      - .github/workflows/build.yml
+      - .github/scripts/**
+  schedule:
+    # 每周一北京时间 05:00（UTC 周日 21:00）自动重建，获取最新 Fedora/RPM Fusion 软件包。
+    - cron: '0 21 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
+      - name: Ensure Podman is installed
+        run: |
+          if ! command -v podman >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y podman
+          fi
+
+      - name: Generate image name and version
+        id: image
+        run: |
+          image=$(printf 'ghcr.io/%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          version=$(TZ=Asia/Shanghai date +%Y%m%d%H%M)
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch previous package list
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          tag=$(gh release list --limit 1 --exclude-drafts --json tagName \
+            --jq '.[0].tagName // empty')
+          if [ -z "$tag" ]; then
+            echo "No previous release found; this will be the first changelog."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if gh release download "$tag" --pattern packages.tsv --dir "$RUNNER_TEMP/previous" 2>/dev/null; then
+            echo "Previous package list: $tag"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Release $tag has no packages.tsv asset; diff will be skipped."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GitHub Container Registry
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+        run: printf '%s' "$REGISTRY_PASSWORD" | podman login ghcr.io --authfile "$REGISTRY_AUTH_FILE" --username "$REGISTRY_USERNAME" --password-stdin
+
+      - name: Build image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+        run: podman build --pull=always --file Containerfile --tag "$IMAGE_NAME:$IMAGE_VERSION" .
+
+      - name: Push image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+        run: |
+          push_image() {
+            ref="$1"
+            for attempt in 1 2 3; do
+              if podman push --authfile "$REGISTRY_AUTH_FILE" "$ref"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "::warning::Push of $ref failed (attempt $attempt/3); retrying in 15s..."
+                sleep 15
+              fi
+            done
+            return 1
+          }
+
+          push_image "$IMAGE_NAME:$IMAGE_VERSION"
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            podman tag "$IMAGE_NAME:$IMAGE_VERSION" "$IMAGE_NAME:latest"
+            push_image "$IMAGE_NAME:latest"
+          fi
+
+      - name: Export package list
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          podman run --rm "$IMAGE_NAME:$IMAGE_VERSION" \
+            rpm -qa --qf '%{NAME}.%{ARCH}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\n' \
+            | LC_ALL=C sort > "$RUNNER_TEMP/curr.tsv"
+          echo "Packages: $(wc -l < "$RUNNER_TEMP/curr.tsv")"
+
+      - name: Generate package changelog
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+          PREV_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          prev_arg=""
+          if [ -s "$RUNNER_TEMP/previous/packages.tsv" ]; then
+            prev_arg="/data/previous/packages.tsv"
+          fi
+
+          podman run --rm \
+            -v "$PWD/.github/scripts:/scripts:ro" \
+            -v "$RUNNER_TEMP:/data" \
+            -e "IMAGE_REF=${IMAGE_NAME}:${IMAGE_VERSION}" \
+            -e "VERSION=${IMAGE_VERSION}" \
+            -e "PREV_TAG=${PREV_TAG}" \
+            -e "IMAGE_TITLE=Fedora bootc" \
+            -e "PACKAGE_MANAGER=rpm" \
+            "$IMAGE_NAME:$IMAGE_VERSION" \
+            bash /scripts/diff-packages.sh "$prev_arg" /data/curr.tsv /data/out
+
+      - name: Write job summary
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+        run: |
+          {
+            echo "### Fedora bootc image"
+            echo "- Image: \`$IMAGE_NAME:$IMAGE_VERSION\`"
+            if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+              echo "- Latest: \`$IMAGE_NAME:latest\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/out/changes.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create changelog release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_VERSION: ${{ steps.image.outputs.version }}
+        run: |
+          tag="build-${IMAGE_VERSION}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; skipping."
+            exit 0
+          fi
+
+          gh release create "$tag" \
+            --title "Fedora bootc ${IMAGE_VERSION}" \
+            --notes-file "$RUNNER_TEMP/out/changes.md" \
+            --latest \
+            "$RUNNER_TEMP/out/packages.tsv" \
+            "$RUNNER_TEMP/out/packages.json" \
+            "$RUNNER_TEMP/out/changes.json" \
+            "$RUNNER_TEMP/out/changes.md"
