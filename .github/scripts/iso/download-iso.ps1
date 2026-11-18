@@ -30,13 +30,20 @@ if ($env:GH_TOKEN) {
 
 function Get-Release {
     if ($Version) {
-        $tag = if ($Version -like "build-*") { $Version } else { "build-$Version" }
+        $tag = if ($Version -match '^release-') {
+            $Version
+        } else {
+            "release-$Version"
+        }
         return Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/releases/tags/$tag"
     }
 
     for ($page = 1; $page -le 5; $page++) {
         $releases = @(Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/releases?per_page=100&page=$page")
         foreach ($release in $releases) {
+            if ($release.tag_name -notmatch '^release-') {
+                continue
+            }
             $hasIso = @($release.assets | Where-Object { $_.name -like "*.iso.part-00" }).Count -gt 0
             if ($hasIso) {
                 return $release
@@ -44,7 +51,7 @@ function Get-Release {
         }
     }
 
-    Fail "no release with ISO parts found in $Repo"
+    Fail "no release-* release with ISO parts found in $Repo"
 }
 
 function Download-File([string]$Url, [string]$Destination) {

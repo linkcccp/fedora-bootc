@@ -25,14 +25,14 @@ usage() {
 Usage: download-iso.sh [options]
 
 Options:
-  --version <tag>      Release tag or version, e.g. build-202611181257 or 202611181257
+  --version <tag>      Release tag, e.g. release-2026.11.18.1514
   --output-dir <dir>   Directory for the parts and final ISO (default: .)
   --keep-parts         Keep the downloaded .part-* files
   --force              Continue even if free disk space looks insufficient
   --repo <owner/repo>  GitHub repository (default: linkcccp/fedora-bootc)
   -h, --help           Show this help
 
-The script finds the newest release that contains an ISO part by default.
+The script finds the newest release-* release that contains an ISO part by default.
 EOF
 }
 
@@ -127,8 +127,8 @@ out=$(cd "$OUTPUT_DIR" && pwd)
 
 if [ -n "$VERSION" ]; then
     case "$VERSION" in
-        build-*) tag=$VERSION ;;
-        *) tag="build-$VERSION" ;;
+        Release-*|release-*) tag=$VERSION ;;
+        *) tag="release-$VERSION" ;;
     esac
     release_json=$(api_get "https://api.github.com/repos/$REPO/releases/tags/$tag")
 else
@@ -136,17 +136,23 @@ else
     page=1
     while [ "$page" -le 5 ]; do
         releases_json=$(api_get "https://api.github.com/repos/$REPO/releases?per_page=100&page=$page")
-        part00_url=$(extract_urls "$releases_json" |
-            grep -E '\.iso\.part-00$' |
-            head -n 1 || true)
-        if [ -n "$part00_url" ]; then
-            tag=$(printf '%s' "$part00_url" | sed -E 's#.*/download/([^/]+)/.*#\1#')
+        while IFS= read -r part00_url; do
+            [ -n "$part00_url" ] || continue
+            candidate=$(printf '%s' "$part00_url" | sed -E 's#.*/download/([^/]+)/.*#\1#')
+            case "$candidate" in
+                Release-*|release-*) ;;
+                *) continue ;;
+            esac
+            tag=$candidate
             release_json=$(api_get "https://api.github.com/repos/$REPO/releases/tags/$tag")
+            break
+        done < <(extract_urls "$releases_json" | grep -E '\.iso\.part-00$' || true)
+        if [ -n "$release_json" ]; then
             break
         fi
         page=$((page + 1))
     done
-    [ -n "$release_json" ] || die "no release with ISO parts found in $REPO"
+    [ -n "$release_json" ] || die "no release-* release with ISO parts found in $REPO"
 fi
 
 release_urls=$(extract_urls "$release_json")
