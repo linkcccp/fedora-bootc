@@ -58,6 +58,34 @@ FROM base
 # 保留 KDE 环境自带的 IBus 软件包及 KDE 所需的 ibus-libs。
 RUN dnf makecache --refresh && dnf environment install -y kde-desktop-environment && dnf clean all
 
+# 安装 Fluent Light Plasma 主题和窗口装饰。
+RUN set -eux; \
+    install -d /tmp/fluent-kde; \
+    curl -fsSL \
+        https://github.com/vinceliuice/Fluent-kde/archive/44794f29c89de994b0179aebabd2f5776c90d236.tar.gz \
+        | tar -xz --strip-components=1 -C /tmp/fluent-kde; \
+    (cd /tmp/fluent-kde && bash ./install.sh --theme default --color light); \
+    install -D -m 0644 /tmp/fluent-kde/LICENSE /usr/share/licenses/fluent-kde/LICENSE; \
+    install -D -m 0644 /tmp/fluent-kde/README.md /usr/share/doc/fluent-kde/README.md; \
+    test -f /usr/share/color-schemes/FluentLight.colors; \
+    test -f /usr/share/plasma/desktoptheme/Fluent-light/metadata.desktop; \
+    test -f /usr/share/aurorae/themes/Fluent-light/metadata.desktop; \
+    rm -rf /tmp/fluent-kde
+
+# 安装 Fluent11 图标主题并保留上游许可证和说明。
+RUN set -eux; \
+    install -d /tmp/fluent11; \
+    curl -fsSL \
+        https://github.com/luisrguerra/fluent11-icon-theme/archive/11c74905bc51be17f1e5b65fc46c02d6c6280577.tar.gz \
+        | tar -xz --strip-components=1 -C /tmp/fluent11; \
+    install -d /usr/share/icons /usr/share/licenses/fluent11-icon-theme /usr/share/doc/fluent11-icon-theme; \
+    cp -a /tmp/fluent11/fluent11 /usr/share/icons/; \
+    install -m 0644 /tmp/fluent11/LICENSE /usr/share/licenses/fluent11-icon-theme/LICENSE; \
+    install -m 0644 /tmp/fluent11/README.md /usr/share/doc/fluent11-icon-theme/README.md; \
+    gtk-update-icon-cache -q /usr/share/icons/fluent11; \
+    test -f /usr/share/icons/fluent11/index.theme; \
+    rm -rf /tmp/fluent11
+
 # 优先使用 RPM Fusion 的完整 ffmpeg；未安装 ffmpeg-free 时直接安装。
 RUN set -eux; \
     dnf makecache --refresh; \
@@ -68,18 +96,37 @@ RUN set -eux; \
     fi; \
     dnf clean all
 
-# 安装简体中文语言包；CJK 字体由 KDE 环境的 @fonts 组提供（Noto CJK 可变字体）。
-RUN dnf makecache --refresh && dnf install -y langpacks-zh_CN && dnf clean all
+# 安装简体中文语言包和 GTK 图标缓存工具；CJK 字体由 KDE 环境的 @fonts 组提供。
+RUN dnf makecache --refresh && dnf install -y langpacks-zh_CN gtk-update-icon-cache && dnf clean all
 
-# 安装 Fcitx5 中文输入法及 KDE 配置模块。
+# 安装 Fcitx5 中文输入法和配置工具。
 RUN dnf makecache --refresh && dnf install -y fcitx5 && dnf clean all
 RUN dnf makecache --refresh && dnf install -y fcitx5-autostart && dnf clean all
 RUN dnf makecache --refresh && dnf install -y fcitx5-chinese-addons && dnf clean all
 RUN dnf makecache --refresh && dnf install -y fcitx5-configtool && dnf clean all
 RUN dnf makecache --refresh && dnf install -y fcitx5-gtk && dnf clean all
 RUN dnf makecache --refresh && dnf install -y fcitx5-qt && dnf clean all
-RUN dnf makecache --refresh && dnf install -y kcm-fcitx5 && dnf clean all
-RUN kwriteconfig6 --file /etc/xdg/kwinrc --group Wayland --key InputMethod /usr/share/applications/org.fcitx.Fcitx5.desktop
+# 写入 KDE/KWin 系统级默认值，用户配置可覆盖。
+# 默认使用 Fcitx5 虚拟键盘、启用神灯效果，并在鼠标闲置 15 秒后隐藏光标。
+RUN set -eux; \
+    kwriteconfig6 --file /etc/xdg/kdeglobals --group General --key ColorScheme FluentLight; \
+    kwriteconfig6 --file /etc/xdg/kdeglobals --group General --key font \
+        'Noto Sans,10,-1,5,50,0,0,0,0,0'; \
+    kwriteconfig6 --file /etc/xdg/kdeglobals --group General --key fixed \
+        'Maple Mono Normal NF CN,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0'; \
+    kwriteconfig6 --file /etc/xdg/kdeglobals --group KDE --key widgetStyle Breeze; \
+    kwriteconfig6 --file /etc/xdg/kdeglobals --group Icons --key Theme fluent11; \
+    kwriteconfig6 --file /etc/xdg/plasmarc --group Theme --key name Fluent-light; \
+    kwriteconfig6 --file /etc/xdg/kcminputrc --group Mouse --key cursorTheme Breeze_Light; \
+    kwriteconfig6 --file /etc/xdg/kwinrc --group Wayland --key InputMethod \
+        /usr/share/applications/org.fcitx.Fcitx5.desktop; \
+    kwriteconfig6 --file /etc/xdg/kwinrc --group org.kde.kdecoration2 --key library \
+        org.kde.kwin.aurorae.v2; \
+    kwriteconfig6 --file /etc/xdg/kwinrc --group org.kde.kdecoration2 --key theme \
+        __aurorae__svg__Fluent-light; \
+    kwriteconfig6 --file /etc/xdg/kwinrc --group Plugins --key magiclampEnabled true; \
+    kwriteconfig6 --file /etc/xdg/kwinrc --group Plugins --key hidecursorEnabled true; \
+    kwriteconfig6 --file /etc/xdg/kwinrc --group Effect-hidecursor --key InactivityDuration 15
 
 # 复制 builder 阶段编译出的 kmod，并在最终镜像安装匹配的用户态驱动。
 # 排除 kmod-nvidia 元包和 akmod-nvidia，避免把编译工具链带入最终镜像。
@@ -113,6 +160,26 @@ RUN set -eux; \
         > /usr/lib/bootc/kargs.d/00-nvidia.toml; \
     rm -rf /rpms; \
     dnf clean all
+
+# 安装 OFL 授权的 Maple Mono Normal NF CN 常用字形。
+RUN set -eux; \
+    curl -fsSL -o /tmp/MapleMonoNormal-NF-CN.zip \
+        https://github.com/subframe7536/maple-font/releases/download/v7.9/MapleMonoNormal-NF-CN.zip; \
+    printf '%s  %s\n' \
+        24aeb14ed756d78b112e6692ea02c669e16afaa0f01e7bfdbb37d2e63fa45fa7 \
+        /tmp/MapleMonoNormal-NF-CN.zip \
+        | sha256sum -c -; \
+    install -d /usr/share/fonts/maple-mono /usr/share/licenses/maple-font; \
+    unzip -j /tmp/MapleMonoNormal-NF-CN.zip \
+        MapleMonoNormal-NF-CN-Regular.ttf \
+        MapleMonoNormal-NF-CN-Bold.ttf \
+        MapleMonoNormal-NF-CN-Italic.ttf \
+        MapleMonoNormal-NF-CN-BoldItalic.ttf \
+        -d /usr/share/fonts/maple-mono; \
+    unzip -p /tmp/MapleMonoNormal-NF-CN.zip LICENSE.txt \
+        > /usr/share/licenses/maple-font/LICENSE.txt; \
+    fc-cache -f /usr/share/fonts/maple-mono; \
+    rm -f /tmp/MapleMonoNormal-NF-CN.zip
 
 # 安装最新版 JetBrains Mono Nerd Font，并解压全部变体。
 RUN set -eux; \
@@ -247,6 +314,15 @@ RUN set -eux; \
         printf '%s\n' 'SHELL=/usr/bin/fish' > /etc/default/useradd; \
     fi; \
     usermod -s /usr/bin/fish root
+
+# 禁用 Plasma 默认面板的悬浮效果，新用户首次创建面板时生效。
+RUN set -eux; \
+    layout=/usr/share/plasma/layout-templates/org.kde.plasma.desktop.defaultPanel/contents/layout.js; \
+    test -f "$layout"; \
+    if ! grep -Fxq 'panel.floating = false' "$layout"; then \
+        sed -i '/^var panel = new Panel$/a panel.floating = false' "$layout"; \
+    fi; \
+    grep -Fxq 'panel.floating = false' "$layout"
 
 # 校验最终镜像是否符合 bootc 规范。
 RUN bootc container lint

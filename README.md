@@ -101,11 +101,27 @@ flatpak install flathub org.mozilla.firefox
 - `fcitx5-configtool`
 - `fcitx5-gtk`
 - `fcitx5-qt`
-- `kcm-fcitx5`
 
 KDE 自带的 IBus 软件包会保留；镜像已将 Fcitx 5 预设为 Plasma Wayland 虚拟键盘，
 `fcitx5-autostart` 负责设置输入法环境变量并随桌面会话启动 Fcitx5。首次进入 KDE 后，
 用 `fcitx5-configtool` 添加“拼音”输入法即可。Wayland 原生应用通过该虚拟键盘设置使用输入法。
+
+## KDE 外观与默认配置
+
+镜像预装 [Fluent-kde](https://github.com/vinceliuice/Fluent-kde) 的 `Fluent-light`
+Plasma 主题和 Aurorae 窗口装饰，以及 [Fluent11](https://github.com/luisrguerra/fluent11-icon-theme)
+图标主题。默认配色为 FluentLight，小部件样式为 Breeze，光标为 Breeze_Light。
+等宽字体使用 [Maple Mono Normal NF CN](https://github.com/subframe7536/maple-font)
+（Regular、Bold、Italic、Bold Italic）；界面字体使用 Noto Sans。主题资源分别保留
+上游许可证，Maple Mono 字体使用 OFL-1.1 许可证。
+
+宿主机的 MiSans 字体未打包进镜像，因为目前没有可核验的再分发授权；界面使用 Fedora
+提供的 Noto Sans。宿主机的动态壁纸和完整面板布局属于用户配置，未复制到系统镜像。
+Plasma 默认面板模板已设为不悬浮，新用户首次生成默认面板时生效。
+
+KWin 默认启用最小化“神灯”动效，并在鼠标闲置 15 秒后隐藏光标。上述外观和 KWin
+选项写入 `/etc/xdg` 作为系统默认值；默认面板模板的禁悬浮设置写入
+`/usr/share/plasma/layout-templates`。已有用户配置仍可覆盖这些默认值。
 
 ## 代理客户端
 
