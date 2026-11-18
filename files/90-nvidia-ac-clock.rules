@@ -1,0 +1,1 @@
+SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ATTR{online}=="[01]", TAG+="systemd", ENV{SYSTEMD_WANTS}="nvidia-clock-ac.service"

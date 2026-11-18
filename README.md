@@ -235,6 +235,27 @@ Containerfile 会：
 - 通过 `/usr/lib/bootc/kargs.d/00-nvidia.toml` 设置
   `rd.driver.blacklist=nouveau`、`modprobe.blacklist=nouveau` 和
   `nvidia-drm.modeset=1`
+- 安装 `/usr/libexec/nvidia-clock-ac`、`nvidia-clock-ac.service` 和
+  `/usr/lib/udev/rules.d/90-nvidia-ac-clock.rules` 来管理 GPU 频率
+
+`nvidia-clock-ac.service` 在接通电源时将 NVIDIA Graphics Clock 锁定在
+`900 MHz` 到该 GPU 的最大频率之间；切换到电池时执行 `nvidia-smi -rgc` 恢复默认。
+udev 规则会在任意 `Mains` 电源状态变化时触发服务；没有电池的台式机按接通电源处理。
+这是运行时 GPU 时钟设置，不是内核或 CPU 频率参数。
+
+如果旧系统在 `/etc/systemd/system/nvidia-clock-ac.service`、
+`/etc/udev/rules.d/90-nvidia-ac-clock.rules` 或 `/usr/local/bin/nvidia-clock-ac`
+保留了手工配置，需要先删除这些文件，避免覆盖或重复触发镜像自带配置：
+
+```sh
+sudo systemctl disable --now nvidia-clock-ac.service
+sudo rm -f /etc/systemd/system/nvidia-clock-ac.service \
+  /etc/systemd/system/multi-user.target.wants/nvidia-clock-ac.service \
+  /etc/udev/rules.d/90-nvidia-ac-clock.rules \
+  /usr/local/bin/nvidia-clock-ac
+sudo systemctl daemon-reload
+sudo udevadm control --reload
+```
 
 最终镜像不安装 `akmod-nvidia`、`akmods` 或编译器，也不在 bootc 系统运行时自动
 重编译模块。系统通过 `bootc upgrade` 切换到包含新内核和新模块的新镜像。启用

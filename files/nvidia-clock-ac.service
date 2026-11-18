@@ -1,0 +1,11 @@
+[Unit]
+Description=Set NVIDIA GPU clock floor when on AC
+After=nvidia-powerd.service systemd-udev-settle.service
+Wants=nvidia-powerd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/nvidia-clock-ac
+
+[Install]
+WantedBy=multi-user.target

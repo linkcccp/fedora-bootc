@@ -160,6 +160,17 @@ RUN set -eux; \
     rm -rf /rpms; \
     dnf clean all
 
+COPY files/nvidia-clock-ac /usr/libexec/nvidia-clock-ac
+COPY files/nvidia-clock-ac.service /usr/lib/systemd/system/nvidia-clock-ac.service
+COPY files/90-nvidia-ac-clock.rules /usr/lib/udev/rules.d/90-nvidia-ac-clock.rules
+
+RUN set -eux; \
+    chmod 0755 /usr/libexec/nvidia-clock-ac; \
+    systemctl enable nvidia-clock-ac.service; \
+    udevadm verify /usr/lib/udev/rules.d/90-nvidia-ac-clock.rules; \
+    test -x /usr/libexec/nvidia-clock-ac; \
+    test -L /etc/systemd/system/multi-user.target.wants/nvidia-clock-ac.service
+
 # 安装 OFL 授权的 Maple Mono Normal NF CN 常用字形。
 RUN set -eux; \
     curl -fsSL -o /tmp/MapleMonoNormal-NF-CN.zip \
