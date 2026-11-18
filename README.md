@@ -8,7 +8,8 @@ VS Code、Microsoft Edge、Google Chrome、Fcitx5 中文输入法、Clash Verge 
 NVIDIA 驱动（构建时本地编译）、多媒体组件、中文字体、语言包和最新版
 JetBrains Mono Nerd Font（安装全部变体），以及一组常用的开发、终端和容器工具
 （Git、Kitty、Neovim、Fish、Podman、Distrobox、Toolbox、ripgrep、fzf、bat、eza、fastfetch、
-starship、ouch 等）。RPM Fusion 的 release 包默认启用主仓库和 updates 仓库。
+starship、ouch 等）。Starship 从 Copr `seaweed/starship` 安装，该仓库在镜像中保持启用。
+RPM Fusion 的 release 包默认启用主仓库和 updates 仓库。
 
 镜像默认进入 `graphical.target` 并启用 Plasma Login Manager（`plasmalogin`），
 适合直接切换到裸机或虚拟机上的 bootc 系统。Fish 被设为 root 和后续通过 `useradd`
