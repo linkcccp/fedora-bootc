@@ -55,11 +55,8 @@ FROM base
 # 安装 KDE Plasma 桌面环境。
 # 该环境已包含 base-graphical、fonts、multimedia、hardware-support、
 # networkmanager-submodules、printing、guest-desktop-agents、firefox 等组。
-# 排除 IBus 主程序，保留 KDE 依赖的 ibus-libs，避免 IBus 与 Fcitx5 同时启动。
-RUN dnf makecache --refresh && dnf environment install -y \
-        --exclude=ibus \
-        kde-desktop-environment \
-    && dnf clean all
+# 保留 KDE 环境自带的 IBus 软件包及 KDE 所需的 ibus-libs。
+RUN dnf makecache --refresh && dnf environment install -y kde-desktop-environment && dnf clean all
 
 # 优先使用 RPM Fusion 的完整 ffmpeg；未安装 ffmpeg-free 时直接安装。
 RUN set -eux; \
@@ -82,6 +79,7 @@ RUN dnf makecache --refresh && dnf install -y fcitx5-configtool && dnf clean all
 RUN dnf makecache --refresh && dnf install -y fcitx5-gtk && dnf clean all
 RUN dnf makecache --refresh && dnf install -y fcitx5-qt && dnf clean all
 RUN dnf makecache --refresh && dnf install -y kcm-fcitx5 && dnf clean all
+RUN kwriteconfig6 --file /etc/xdg/kwinrc --group Wayland --key InputMethod /usr/share/applications/org.fcitx.Fcitx5.desktop
 
 # 复制 builder 阶段编译出的 kmod，并在最终镜像安装匹配的用户态驱动。
 # 排除 kmod-nvidia 元包和 akmod-nvidia，避免把编译工具链带入最终镜像。
