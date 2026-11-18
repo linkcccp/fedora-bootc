@@ -1,0 +1,31 @@
+#!/bin/bash
+set -u
+
+nvidia_smi=$(command -v nvidia-smi || true)
+[ -n "$nvidia_smi" ] || exit 0
+
+mains_found=0
+ac_online=0
+for supply in /sys/class/power_supply/*; do
+    [ -e "$supply" ] || continue
+    [ "$(cat "$supply/type" 2>/dev/null)" = "Mains" ] || continue
+    mains_found=1
+    if [ "$(cat "$supply/online" 2>/dev/null)" = "1" ]; then
+        ac_online=1
+        break
+    fi
+done
+
+if [ "$mains_found" -eq 1 ] && [ "$ac_online" -eq 0 ]; then
+    "$nvidia_smi" -rgc >/dev/null 2>&1 || true
+    exit 0
+fi
+
+max_clock=$("$nvidia_smi" --query-gpu=clocks.max.graphics --format=csv,noheader,nounits 2>/dev/null |
+    head -n 1 | tr -d '[:space:]')
+case "$max_clock" in
+    ''|*[!0-9]*) max_clock=2100 ;;
+esac
+[ "$max_clock" -ge 900 ] || exit 0
+
+"$nvidia_smi" -lgc "900,$max_clock" >/dev/null 2>&1 || true
