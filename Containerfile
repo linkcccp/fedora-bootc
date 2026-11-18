@@ -220,7 +220,10 @@ RUN dnf makecache --refresh && dnf install -y btop && dnf clean all
 RUN dnf makecache --refresh && dnf install -y jq && dnf clean all
 RUN dnf makecache --refresh && dnf install -y yq && dnf clean all
 RUN dnf makecache --refresh && dnf install -y p7zip && dnf clean all
-RUN dnf makecache --refresh && dnf install -y ouch && dnf clean all
+RUN dnf copr enable -y boobaa/ouch \
+    && dnf makecache --refresh \
+    && dnf install -y ouch \
+    && dnf clean all
 
 # 安装 Flatpak，并通过系统级 remotes.d 预配置 Flathub 源。
 RUN dnf makecache --refresh && dnf install -y flatpak && dnf clean all
@@ -231,6 +234,9 @@ RUN set -eux; \
         https://flathub.org/repo/flathub.flatpakrepo; \
     grep -q '^\[Flatpak Repo\]' /usr/share/flatpak/remotes.d/flathub.flatpakrepo; \
     grep -q '^GPGKey=' /usr/share/flatpak/remotes.d/flathub.flatpakrepo
+
+# 安装 Google Chrome 仓库配置；该仓库默认禁用，安装 Chrome 时临时启用。
+RUN dnf makecache --refresh && dnf install -y fedora-workstation-repositories && dnf clean all
 
 # 导入第三方仓库 key，并写入 VS Code、Microsoft Edge 仓库配置。
 # Google Chrome 仓库由 fedora-workstation-repositories 提供。
