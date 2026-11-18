@@ -33,9 +33,62 @@ GitHub Actions 会在推送到 `main`、手动触发及每周一北京时间 05:
 `ghcr.io/linkcccp/fedora-bootc`。每次构建使用上海时区 `YYYYMMDDHHmm`
 版本 tag；默认分支同时更新 `latest`。
 
+除容器镜像外，每周定时构建和手动触发还会生成 KDE 桌面安装 ISO，并附加到对应的
+`build-YYYYMMDDHHmm` Release。ISO 是交互式 Anaconda 安装介质，内嵌完整镜像，
+可以离线安装，适合用 Ventoy U 盘从零安装。
+
 每次构建还会导出 RPM 软件包清单，并用 `rpm.vercmp` 与上一个 Release 比较，
 生成软件包变更记录。默认分支构建会创建 `build-YYYYMMDDHHmm` Release，附件包含
-`packages.tsv`、`packages.json`、`changes.json` 和 `changes.md`。
+`packages.tsv`、`packages.json`、`changes.json`、`changes.md` 和 ISO 下载脚本；
+定时或手动触发的构建还会附加 ISO 分卷。
+
+## 从 ISO 安装（Ventoy）
+
+GitHub Release 限制单个附件最大 2 GiB，而 ISO 内嵌完整镜像，体积约 10 GB，因此
+ISO 以 `.iso.part-*` 分卷发布。Release 会附带下载合并脚本，脚本会自动
+找到最新的 ISO Release、下载全部分卷、校验并合并成单个 `.iso`。
+
+Linux/macOS：
+
+```sh
+curl -fLO https://github.com/linkcccp/fedora-bootc/releases/latest/download/download-iso.sh
+bash download-iso.sh
+```
+
+Windows：从最新 Release 下载 `download-iso.cmd`，双击运行；如果同目录缺少
+`download-iso.ps1`，脚本会自动下载。
+
+脚本默认下载约 10 GB 数据，需要至少约 14 GiB 可用空间；合并完成后会删除分卷。
+可用参数：
+
+```sh
+# 指定版本
+bash download-iso.sh --version 202611181257
+# 保留分卷
+bash download-iso.sh --keep-parts
+# 指定输出目录
+bash download-iso.sh --output-dir /path/to/isos
+```
+
+也可以手动下载全部分卷和 `.iso.sha256` 后合并：
+
+```sh
+cat fedora-bootc-kde-*.iso.part-* > fedora-bootc-kde.iso
+sha256sum -c fedora-bootc-kde-*.iso.sha256
+```
+
+把合并后的 ISO 复制到 Ventoy U 盘，启动时选择该 ISO。安装流程：
+
+1. 进入 Anaconda 图形安装界面，选择语言、键盘和时区。
+2. 在“安装目的地”选择磁盘；一般使用自动分区即可。自定义分区时必须给 `/boot`
+   设置标签 `boot`。
+3. 创建用户并加入 `wheel` 组；安装器不会自动清空磁盘，所有写入都要等确认后开始。
+4. 安装完成后重启，系统通过 `bootc upgrade` 跟踪
+   `ghcr.io/linkcccp/fedora-bootc:latest`。
+
+ISO 内嵌完整镜像，安装过程不需要联网。启用 Secure Boot 时，NVIDIA 内核模块没有
+签名，可能无法加载；需要 NVIDIA 驱动时请关闭 Secure Boot，或自行配置模块签名和
+MOK 注册。
 
 bootc 镜像自带内核和引导，构建中不执行全量 `dnf upgrade`，系统更新通过
 `bootc upgrade` 完成。

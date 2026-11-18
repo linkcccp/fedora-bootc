@@ -1,0 +1,4 @@
+.github/scripts/iso/*.sh text eol=lf
+.github/scripts/iso/*.cmd text eol=crlf
+.github/scripts/iso/*.ps1 text eol=crlf
+iso/config.toml text eol=lf
