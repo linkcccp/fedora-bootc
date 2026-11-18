@@ -134,8 +134,9 @@ KWin 默认启用最小化“神灯”动效，并在鼠标闲置 15 秒后隐�
 - v2rayN：构建时从 GitHub 最新 release 选择 RHEL x86_64 RPM
 
 构建过程会调用 GitHub Releases API 获取最新版本，重新构建镜像即可升级，
-不需要修改版本参数。GitHub API 对未认证请求有速率限制；如果构建时被限流，
-稍后重试即可。
+不需要修改版本参数。GitHub Actions 使用工作流自带的 token 查询 release，避免匿名请求的
+API 速率限制；直接本地构建时若匿名 API 被限流，可稍后重试或通过
+`CLASH_VERGE_RPM_URL`、`V2RAYN_RPM_URL` build args 传入对应 RPM URL。
 
 ## NVIDIA 驱动
 
