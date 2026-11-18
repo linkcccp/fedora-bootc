@@ -29,24 +29,44 @@ sudo bootc switch ghcr.io/linkcccp/fedora-bootc:latest
 sudo systemctl reboot
 ```
 
-GitHub Actions 会在推送到 `main`、手动触发及每周一北京时间 05:00 构建并推送
-`ghcr.io/linkcccp/fedora-bootc`。每次构建使用上海时区 `YYYYMMDDHHmm`
-版本 tag；默认分支同时更新 `latest`。
+GitHub Actions 只响应标签和定时任务，推送到 `main` 不会触发构建。仓库只保留
+`dev.yml` 和 `iso.yml` 两个工作流。
 
-除容器镜像外，每周定时构建和手动触发还会生成 KDE 桌面安装 ISO，并附加到对应的
-`build-YYYYMMDDHHmm` Release。ISO 是交互式 Anaconda 安装介质，内嵌完整镜像，
-可以离线安装，适合用 Ventoy U 盘从零安装。
+### Dev 构建
 
-每次构建还会导出 RPM 软件包清单，并用 `rpm.vercmp` 与上一个 Release 比较，
-生成软件包变更记录。默认分支构建会创建 `build-YYYYMMDDHHmm` Release，附件包含
-`packages.tsv`、`packages.json`、`changes.json`、`changes.md` 和 ISO 下载脚本；
-定时或手动触发的构建还会附加 ISO 分卷。
+创建并推送 `dev-*` 或 `Dev-*` 标签（例如 `dev-test1` 或 `Dev-20261118-1`）会构建容器
+镜像，镜像 tag 和 GitHub Release tag 都使用完整标签。Dev 构建会更新
+`ghcr.io/linkcccp/fedora-bootc:latest`，并创建 GitHub Release；Release 附件包含
+`packages.tsv`、`packages.json`、`changes.json`、`changes.md` 和 ISO 下载脚本，但
+不包含 ISO。
+
+另有每 3 天北京时间 05:00 的定时 Dev 构建，标签为 `dev-YYYY.MM.DD.HHMM`，例如
+`dev-2026.11.18.1514`。
+
+### Release 构建
+
+创建并推送 `release-*` 或 `Release-*` 标签（后缀任意，例如 `release-2026.11.18.1514`）
+会完整构建容器镜像和 KDE 桌面安装 ISO。镜像 tag、GitHub Release tag 都使用完整标签；
+镜像会更新 `latest`。Release 附件包含 ISO 分卷、校验文件、下载脚本、
+`packages.tsv`、`packages.json`、`changes.json` 和 `changes.md`。
+
+另有每 7 天北京时间周一 11:00 的定时 Release 构建，标签为
+`release-YYYY.MM.DD.HHMM`，例如 `release-2026.11.18.1514`。
+
+Dev 和 Release 都会把各自成功的镜像推送到 GHCR 的 `latest`，并把 GitHub Release
+标记为 latest；因此两个 `latest` 都指向最近一次成功的构建，Dev 构建可能成为 latest。
+ISO 是交互式 Anaconda 安装介质，内嵌完整镜像，可以离线安装，适合用 Ventoy U 盘
+从零安装。每次构建会根据最近一个包含 `packages.tsv` 的 GitHub Release（不区分
+Dev/Release 前缀）生成软件包变更记录；ISO 资产只保留最近 3 个 Release。
 
 ## 从 ISO 安装（Ventoy）
 
 GitHub Release 限制单个附件最大 2 GiB，而 ISO 内嵌完整镜像，体积约 10 GB，因此
 ISO 以 `.iso.part-*` 分卷发布。Release 会附带下载合并脚本，脚本会自动
-找到最新的 ISO Release、下载全部分卷、校验并合并成单个 `.iso`。
+找到最新的 `release-*` ISO Release、下载全部分卷、校验并合并成单个 `.iso`。
+所有 Release（包括没有 ISO 的 Dev Release）都会附带这些脚本，因此 latest Release
+是 Dev 时，`releases/latest/download/download-iso.sh` 仍然可用；脚本会自动跳过
+没有 ISO 分卷的 Release。
 
 Linux/macOS：
 
@@ -62,8 +82,10 @@ Windows：从最新 Release 下载 `download-iso.cmd`，双击运行；如果同
 可用参数：
 
 ```sh
-# 指定版本
-bash download-iso.sh --version 202611181257
+# 指定 Release 标签
+bash download-iso.sh --version release-2026.11.18.1514
+# 也可省略 release- 前缀
+bash download-iso.sh --version 2026.11.18.1514
 # 保留分卷
 bash download-iso.sh --keep-parts
 # 指定输出目录
@@ -73,8 +95,9 @@ bash download-iso.sh --output-dir /path/to/isos
 也可以手动下载全部分卷和 `.iso.sha256` 后合并：
 
 ```sh
-cat fedora-bootc-kde-*.iso.part-* > fedora-bootc-kde.iso
-sha256sum -c fedora-bootc-kde-*.iso.sha256
+iso_name=$(basename "$(ls fedora-bootc-kde-*.iso.part-00)" .part-00)
+cat "$iso_name".part-* > "$iso_name"
+sha256sum -c "$iso_name.sha256"
 ```
 
 把合并后的 ISO 复制到 Ventoy U 盘，启动时选择该 ISO。安装流程：

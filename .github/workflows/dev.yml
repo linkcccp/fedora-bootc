@@ -1,0 +1,239 @@
+name: Dev
+
+on:
+  push:
+    tags:
+      - 'Dev-*'
+      - 'dev-*'
+  schedule:
+    # 每 3 天北京时间 05:00（UTC 前一天 21:00）自动构建 Dev 镜像。
+    - cron: '0 21 */3 * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dev:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Compute image tag
+        id: meta
+        run: |
+          export LC_ALL=C
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="dev-$(TZ=Asia/Shanghai date +%Y.%m.%d.%H%M)"
+          fi
+          case "$tag" in
+            dev-*|Dev-*) ;;
+            *)
+              echo "::error::Invalid Dev tag: $tag (expected dev-* or Dev-*)"
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$'; then
+            echo "::error::Invalid Docker tag: $tag"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
+      - name: Ensure Podman is installed
+        run: |
+          if ! command -v podman >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y podman
+          fi
+
+      - name: Generate image name
+        id: image
+        run: |
+          image=$(printf 'ghcr.io/%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ github.token }}
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+        run: printf '%s' "$REGISTRY_PASSWORD" | podman login ghcr.io --authfile "$REGISTRY_AUTH_FILE" --username "$REGISTRY_USERNAME" --password-stdin
+
+      - name: Resolve Clash Verge RPM
+        id: clash
+        run: |
+          url=$(gh api repos/clash-verge-rev/clash-verge-rev/releases/latest \
+            --jq '[.assets[] | select(.name | endswith(".x86_64.rpm"))][0].browser_download_url // empty')
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve v2rayN RPM
+        id: v2rayn
+        run: |
+          url=$(gh api repos/2dust/v2rayN/releases/latest \
+            --jq '[.assets[] | select(.name == "v2rayN-linux-rhel-64.rpm")][0].browser_download_url // empty')
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+          CLASH_VERGE_RPM_URL: ${{ steps.clash.outputs.url }}
+          V2RAYN_RPM_URL: ${{ steps.v2rayn.outputs.url }}
+        run: |
+          podman build --pull=always \
+            --build-arg "CLASH_VERGE_RPM_URL=$CLASH_VERGE_RPM_URL" \
+            --build-arg "V2RAYN_RPM_URL=$V2RAYN_RPM_URL" \
+            --file Containerfile --tag "$IMAGE_NAME:$IMAGE_TAG" .
+
+      - name: Push image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+        run: |
+          push_image() {
+            ref="$1"
+            for attempt in 1 2 3; do
+              if podman push --authfile "$REGISTRY_AUTH_FILE" "$ref"; then
+                return 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "::warning::Push of $ref failed (attempt $attempt/3); retrying in 15s..."
+                sleep 15
+              fi
+            done
+            return 1
+          }
+
+          push_image "$IMAGE_NAME:$IMAGE_TAG"
+          podman tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest"
+          push_image "$IMAGE_NAME:latest"
+
+      - name: Export package list
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          podman run --rm "$IMAGE_NAME:$IMAGE_TAG" \
+            rpm -qa --qf '%{NAME}.%{ARCH}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\n' \
+            | LC_ALL=C sort > "$RUNNER_TEMP/curr.tsv"
+          echo "Packages: $(wc -l < "$RUNNER_TEMP/curr.tsv")"
+
+      - name: Fetch previous package list
+        id: previous
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          prev_tag=""
+          while IFS= read -r tag; do
+            [ "$tag" = "$IMAGE_TAG" ] && continue
+            names=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
+            if ! grep -qx 'packages.tsv' <<< "$names"; then
+              continue
+            fi
+            rm -f "$RUNNER_TEMP/previous/packages.tsv"
+            if gh release download "$tag" --pattern packages.tsv --dir "$RUNNER_TEMP/previous"; then
+              prev_tag="$tag"
+              echo "Previous package list: $tag"
+              break
+            fi
+            echo "::warning::Failed to download packages.tsv from $tag"
+          done < <(gh release list --limit 100 --exclude-drafts --json tagName --jq '.[].tagName')
+          echo "prev_tag=$prev_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Generate package changelog
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+          PREV_TAG: ${{ steps.previous.outputs.prev_tag }}
+        run: |
+          prev_arg=""
+          if [ -s "$RUNNER_TEMP/previous/packages.tsv" ]; then
+            prev_arg="/data/previous/packages.tsv"
+          fi
+
+          podman run --rm \
+            -v "$PWD/.github/scripts:/scripts:ro" \
+            -v "$RUNNER_TEMP:/data" \
+            -e "IMAGE_REF=${IMAGE_NAME}:${IMAGE_TAG}" \
+            -e "VERSION=${IMAGE_TAG}" \
+            -e "PREV_TAG=${PREV_TAG}" \
+            -e "GENERATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -e "IMAGE_TITLE=Fedora bootc" \
+            -e "PACKAGE_MANAGER=rpm" \
+            "$IMAGE_NAME:$IMAGE_TAG" \
+            bash /scripts/diff-packages.sh "$prev_arg" /data/curr.tsv /data/out
+
+      - name: Create or update release
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          assets=(
+            "$RUNNER_TEMP/out/packages.tsv"
+            "$RUNNER_TEMP/out/packages.json"
+            "$RUNNER_TEMP/out/changes.json"
+            "$RUNNER_TEMP/out/changes.md"
+            .github/scripts/iso/download-iso.sh
+            .github/scripts/iso/download-iso.ps1
+            .github/scripts/iso/download-iso.cmd
+          )
+
+          if gh release view "$IMAGE_TAG" >/dev/null 2>&1; then
+            gh release upload "$IMAGE_TAG" "${assets[@]}" --clobber
+            gh release edit "$IMAGE_TAG" --latest --notes-file "$RUNNER_TEMP/out/changes.md"
+            exit 0
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            gh release create "$IMAGE_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "Fedora bootc ${IMAGE_TAG}" \
+              --notes-file "$RUNNER_TEMP/out/changes.md" \
+              --latest \
+              "${assets[@]}"
+          else
+            gh release create "$IMAGE_TAG" \
+              --verify-tag \
+              --title "Fedora bootc ${IMAGE_TAG}" \
+              --notes-file "$RUNNER_TEMP/out/changes.md" \
+              --latest \
+              "${assets[@]}"
+          fi
+
+      - name: Write job summary
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          {
+            echo "### Dev image"
+            echo "- Image: \`$IMAGE_NAME:$IMAGE_TAG\`"
+            echo "- Latest: \`$IMAGE_NAME:latest\`"
+            echo "- Release: \`$IMAGE_TAG\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/out/changes.md" >> "$GITHUB_STEP_SUMMARY"
