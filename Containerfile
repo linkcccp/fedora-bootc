@@ -211,7 +211,10 @@ RUN dnf makecache --refresh && dnf install -y fzf && dnf clean all
 RUN dnf makecache --refresh && dnf install -y bat && dnf clean all
 RUN dnf makecache --refresh && dnf install -y eza && dnf clean all
 RUN dnf makecache --refresh && dnf install -y fastfetch && dnf clean all
-RUN dnf makecache --refresh && dnf install -y starship && dnf clean all
+RUN dnf copr enable -y seaweed/starship \
+    && dnf makecache --refresh \
+    && dnf install -y starship \
+    && dnf clean all
 RUN dnf makecache --refresh && dnf install -y htop && dnf clean all
 RUN dnf makecache --refresh && dnf install -y btop && dnf clean all
 RUN dnf makecache --refresh && dnf install -y jq && dnf clean all
