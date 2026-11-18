@@ -103,10 +103,9 @@ flatpak install flathub org.mozilla.firefox
 - `fcitx5-qt`
 - `kcm-fcitx5`
 
-KDE 环境默认安装的 IBus 已在构建时排除，避免与 Fcitx5 同时启动。
+KDE 自带的 IBus 软件包会保留；镜像已将 Fcitx 5 预设为 Plasma Wayland 虚拟键盘，
 `fcitx5-autostart` 负责设置输入法环境变量并随桌面会话启动 Fcitx5。首次进入 KDE 后，
-在“系统设置 → 键盘 → 虚拟键盘”中选择 Fcitx 5，然后用 `fcitx5-configtool`
-添加“拼音”输入法。Wayland 原生应用还需要该虚拟键盘设置才能使用输入法。
+用 `fcitx5-configtool` 添加“拼音”输入法即可。Wayland 原生应用通过该虚拟键盘设置使用输入法。
 
 ## 代理客户端
 
