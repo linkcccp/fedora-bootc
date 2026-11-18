@@ -56,7 +56,7 @@ FROM base
 # 该环境已包含 base-graphical、fonts、multimedia、hardware-support、
 # networkmanager-submodules、printing、guest-desktop-agents、firefox 等组。
 # 保留 KDE 环境自带的 IBus 软件包及 KDE 所需的 ibus-libs。
-RUN dnf makecache --refresh && dnf environment install -y kde-desktop-environment && dnf clean all
+RUN dnf environment install -y kde-desktop-environment && dnf clean all
 
 # 安装 Fluent Light Plasma 主题和窗口装饰。
 RUN set -eux; \
@@ -88,7 +88,6 @@ RUN set -eux; \
 
 # 优先使用 RPM Fusion 的完整 ffmpeg；未安装 ffmpeg-free 时直接安装。
 RUN set -eux; \
-    dnf makecache --refresh; \
     if rpm -q ffmpeg-free >/dev/null 2>&1; then \
         dnf swap -y ffmpeg-free ffmpeg --allowerasing; \
     else \
@@ -97,15 +96,15 @@ RUN set -eux; \
     dnf clean all
 
 # 安装简体中文语言包和 GTK 图标缓存工具；CJK 字体由 KDE 环境的 @fonts 组提供。
-RUN dnf makecache --refresh && dnf install -y langpacks-zh_CN gtk-update-icon-cache && dnf clean all
+RUN dnf install -y langpacks-zh_CN gtk-update-icon-cache && dnf clean all
 
 # 安装 Fcitx5 中文输入法和配置工具。
-RUN dnf makecache --refresh && dnf install -y fcitx5 && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fcitx5-autostart && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fcitx5-chinese-addons && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fcitx5-configtool && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fcitx5-gtk && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fcitx5-qt && dnf clean all
+RUN dnf install -y fcitx5 && dnf clean all
+RUN dnf install -y fcitx5-autostart && dnf clean all
+RUN dnf install -y fcitx5-chinese-addons && dnf clean all
+RUN dnf install -y fcitx5-configtool && dnf clean all
+RUN dnf install -y fcitx5-gtk && dnf clean all
+RUN dnf install -y fcitx5-qt && dnf clean all
 # 写入 KDE/KWin 系统级默认值，用户配置可覆盖。
 # 默认使用 Fcitx5 虚拟键盘、启用神灯效果，并在鼠标闲置 15 秒后隐藏光标。
 RUN set -eux; \
@@ -194,39 +193,37 @@ RUN set -eux; \
 # 开发、终端与容器工具。每个软件单独一层，避免更新一个包时重建整组。
 # curl、unzip、rsync、wget 和 toolbox 已由 KDE 环境的 core、standard、
 # kde-desktop 组提供，这里不再重复安装。
-RUN dnf makecache --refresh && dnf install -y git && dnf clean all
-RUN dnf makecache --refresh && dnf install -y git-lfs && dnf clean all
-RUN dnf makecache --refresh && dnf install -y gh && dnf clean all
-RUN dnf makecache --refresh && dnf install -y neovim && dnf clean all
-RUN dnf makecache --refresh && dnf install -y kitty && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fish && dnf clean all
-RUN dnf makecache --refresh && dnf install -y podman && dnf clean all
-RUN dnf makecache --refresh && dnf install -y podman-compose && dnf clean all
-RUN dnf makecache --refresh && dnf install -y buildah && dnf clean all
-RUN dnf makecache --refresh && dnf install -y skopeo && dnf clean all
-RUN dnf makecache --refresh && dnf install -y distrobox && dnf clean all
-RUN dnf makecache --refresh && dnf install -y ripgrep && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fd-find && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fzf && dnf clean all
-RUN dnf makecache --refresh && dnf install -y bat && dnf clean all
-RUN dnf makecache --refresh && dnf install -y eza && dnf clean all
-RUN dnf makecache --refresh && dnf install -y fastfetch && dnf clean all
+RUN dnf install -y git && dnf clean all
+RUN dnf install -y git-lfs && dnf clean all
+RUN dnf install -y gh && dnf clean all
+RUN dnf install -y neovim && dnf clean all
+RUN dnf install -y kitty && dnf clean all
+RUN dnf install -y fish && dnf clean all
+RUN dnf install -y podman && dnf clean all
+RUN dnf install -y podman-compose && dnf clean all
+RUN dnf install -y buildah && dnf clean all
+RUN dnf install -y skopeo && dnf clean all
+RUN dnf install -y distrobox && dnf clean all
+RUN dnf install -y ripgrep && dnf clean all
+RUN dnf install -y fd-find && dnf clean all
+RUN dnf install -y fzf && dnf clean all
+RUN dnf install -y bat && dnf clean all
+RUN dnf install -y eza && dnf clean all
+RUN dnf install -y fastfetch && dnf clean all
 RUN dnf copr enable -y seaweed/starship \
-    && dnf makecache --refresh \
     && dnf install -y starship \
     && dnf clean all
-RUN dnf makecache --refresh && dnf install -y htop && dnf clean all
-RUN dnf makecache --refresh && dnf install -y btop && dnf clean all
-RUN dnf makecache --refresh && dnf install -y jq && dnf clean all
-RUN dnf makecache --refresh && dnf install -y yq && dnf clean all
-RUN dnf makecache --refresh && dnf install -y p7zip && dnf clean all
+RUN dnf install -y htop && dnf clean all
+RUN dnf install -y btop && dnf clean all
+RUN dnf install -y jq && dnf clean all
+RUN dnf install -y yq && dnf clean all
+RUN dnf install -y p7zip && dnf clean all
 RUN dnf copr enable -y boobaa/ouch \
-    && dnf makecache --refresh \
     && dnf install -y ouch \
     && dnf clean all
 
 # 安装 Flatpak，并通过系统级 remotes.d 预配置 Flathub 源。
-RUN dnf makecache --refresh && dnf install -y flatpak && dnf clean all
+RUN dnf install -y flatpak && dnf clean all
 RUN set -eux; \
     install -d /usr/share/flatpak/remotes.d; \
     curl -fsSL --retry 3 --retry-all-errors \
@@ -236,7 +233,7 @@ RUN set -eux; \
     grep -q '^GPGKey=' /usr/share/flatpak/remotes.d/flathub.flatpakrepo
 
 # 安装 Google Chrome 仓库配置；该仓库默认禁用，安装 Chrome 时临时启用。
-RUN dnf makecache --refresh && dnf install -y fedora-workstation-repositories && dnf clean all
+RUN dnf install -y fedora-workstation-repositories && dnf clean all
 
 # 导入第三方仓库 key，并写入 VS Code、Microsoft Edge 仓库配置。
 # Google Chrome 仓库由 fedora-workstation-repositories 提供。
@@ -263,27 +260,35 @@ RUN set -eux; \
         > /etc/yum.repos.d/microsoft-edge.repo
 
 # 安装 VS Code、Microsoft Edge 和 Google Chrome。
-RUN dnf makecache --refresh --enablerepo=code && dnf install -y --enablerepo=code code && dnf clean all
-RUN dnf makecache --refresh --enablerepo=microsoft-edge && dnf install -y --enablerepo=microsoft-edge microsoft-edge-stable && dnf clean all
-RUN dnf makecache --refresh --enablerepo=google-chrome && dnf install -y --enablerepo=google-chrome google-chrome-stable && dnf clean all
+RUN dnf install -y --enablerepo=code code && dnf clean all
+RUN dnf install -y --enablerepo=microsoft-edge microsoft-edge-stable && dnf clean all
+RUN dnf install -y --enablerepo=google-chrome google-chrome-stable && dnf clean all
 
-# 安装最新版 Clash Verge Rev，使用上游提供的 x86_64 RPM。
+# 安装最新版 Clash Verge Rev，CI 传入经认证 API 解析的 RPM URL；
+# 未传入时本地构建回退到公开 GitHub API。
+ARG CLASH_VERGE_RPM_URL
 RUN set -eux; \
-    clash_url="$(curl -fsSL --retry 3 --retry-all-errors \
-        -H 'Accept: application/vnd.github+json' \
-        https://api.github.com/repos/clash-verge-rev/clash-verge-rev/releases/latest \
-        | jq -er '[.assets[] | select(.name | endswith(".x86_64.rpm"))][0].browser_download_url')"; \
-    dnf makecache --refresh; \
+    clash_url="${CLASH_VERGE_RPM_URL:-}"; \
+    if [ -z "$clash_url" ]; then \
+        clash_url="$(curl -fsSL --retry 3 --retry-all-errors \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/clash-verge-rev/clash-verge-rev/releases/latest \
+            | jq -er '[.assets[] | select(.name | endswith(".x86_64.rpm"))][0].browser_download_url')"; \
+    fi; \
     dnf install -y "$clash_url"; \
     dnf clean all
 
-# 安装最新版 v2rayN，使用上游提供的 RHEL x86_64 RPM。
+# 安装最新版 v2rayN，CI 传入经认证 API 解析的 RHEL x86_64 RPM URL；
+# 未传入时本地构建回退到公开 GitHub API。
+ARG V2RAYN_RPM_URL
 RUN set -eux; \
-    v2rayn_url="$(curl -fsSL --retry 3 --retry-all-errors \
-        -H 'Accept: application/vnd.github+json' \
-        https://api.github.com/repos/2dust/v2rayN/releases/latest \
-        | jq -er '[.assets[] | select(.name == "v2rayN-linux-rhel-64.rpm")][0].browser_download_url')"; \
-    dnf makecache --refresh; \
+    v2rayn_url="${V2RAYN_RPM_URL:-}"; \
+    if [ -z "$v2rayn_url" ]; then \
+        v2rayn_url="$(curl -fsSL --retry 3 --retry-all-errors \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/2dust/v2rayN/releases/latest \
+            | jq -er '[.assets[] | select(.name == "v2rayN-linux-rhel-64.rpm")][0].browser_download_url')"; \
+    fi; \
     dnf install -y "$v2rayn_url"; \
     dnf clean all
 
