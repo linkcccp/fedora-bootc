@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - Containerfile
+      - iso/**
       - .github/workflows/build.yml
       - .github/scripts/**
   schedule:
@@ -25,9 +26,29 @@ jobs:
     permissions:
       contents: write
       packages: write
+    outputs:
+      version: ${{ steps.image.outputs.version }}
+      image: ${{ steps.image.outputs.name }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Validate ISO download scripts
+        run: |
+          bash -n .github/scripts/iso/download-iso.sh
+          pwsh -NoProfile -Command '
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              ".github/scripts/iso/download-iso.ps1",
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+          '
 
       - name: Free up disk space
         run: |
@@ -195,7 +216,12 @@ jobs:
         run: |
           tag="build-${IMAGE_VERSION}"
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists; skipping."
+            echo "Release $tag already exists; updating ISO download scripts."
+            gh release upload "$tag" \
+              .github/scripts/iso/download-iso.sh \
+              .github/scripts/iso/download-iso.ps1 \
+              .github/scripts/iso/download-iso.cmd \
+              --clobber
             exit 0
           fi
 
@@ -206,4 +232,169 @@ jobs:
             "$RUNNER_TEMP/out/packages.tsv" \
             "$RUNNER_TEMP/out/packages.json" \
             "$RUNNER_TEMP/out/changes.json" \
-            "$RUNNER_TEMP/out/changes.md"
+            "$RUNNER_TEMP/out/changes.md" \
+            .github/scripts/iso/download-iso.sh \
+            .github/scripts/iso/download-iso.ps1 \
+            .github/scripts/iso/download-iso.cmd
+
+  iso:
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+      packages: read
+    env:
+      IMAGE_NAME: ${{ needs.build.outputs.image }}
+      IMAGE_VERSION: ${{ needs.build.outputs.version }}
+      BIB_IMAGE: quay.io/centos-bootc/bootc-image-builder:latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /usr/local/.ghcup \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost
+          sudo apt-get clean
+          sudo docker image prune --all --force || true
+          df -h
+
+      - name: Ensure Podman is installed
+        run: |
+          if ! command -v podman >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y podman
+          fi
+
+      - name: Prepare build storage
+        run: |
+          if mountpoint -q /mnt; then
+            root=/mnt
+          else
+            root="$RUNNER_TEMP"
+          fi
+          echo "BIB_ROOT=$root" >> "$GITHUB_ENV"
+          sudo rm -rf "$root/bib-output" "$root/containers"
+          sudo mkdir -p "$root/bib-output" "$root/containers"
+          sudo chown "$(id -u):$(id -g)" "$root/bib-output"
+          sudo mkdir -p /var/lib/containers/storage
+          sudo mount --bind "$root/containers" /var/lib/containers/storage
+          available=$(df -Pk "$root" | awk 'NR == 2 { print $4 }')
+          if [ "$available" -lt $((50 * 1024 * 1024)) ]; then
+            echo "::error::Not enough free space on $root: $((available / 1024 / 1024)) GiB available, need at least 50 GiB"
+            exit 1
+          fi
+          df -h "$root"
+
+      - name: Log in to GitHub Container Registry
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_PASSWORD" | sudo podman login ghcr.io --username "$REGISTRY_USERNAME" --password-stdin
+
+      - name: Pull image
+        run: sudo podman pull "$IMAGE_NAME:$IMAGE_VERSION"
+
+      - name: Build ISO
+        run: |
+          sudo podman run --rm --privileged --pull=newer \
+            --security-opt label=type:unconfined_t \
+            -v "$PWD/iso/config.toml:/config.toml:ro" \
+            -v "$BIB_ROOT/bib-output:/output" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            "$BIB_IMAGE" \
+            --type anaconda-iso \
+            --rootfs btrfs \
+            --use-librepo=True \
+            --target-arch x86_64 \
+            --config /config.toml \
+            "$IMAGE_NAME:$IMAGE_VERSION"
+
+      - name: Prepare release assets
+        run: |
+          asset_dir="$BIB_ROOT/assets"
+          sudo rm -rf "$asset_dir"
+          sudo mkdir -p "$asset_dir"
+          sudo chown "$(id -u):$(id -g)" "$asset_dir"
+
+          iso_src=$(sudo find "$BIB_ROOT/bib-output" -type f -name '*.iso' -print -quit)
+          test -n "$iso_src"
+          iso_name="fedora-bootc-kde-${IMAGE_VERSION}-x86_64.iso"
+          sudo cp "$iso_src" "$asset_dir/$iso_name"
+          sudo chown "$(id -u):$(id -g)" "$asset_dir/$iso_name"
+          sudo rm -rf "$BIB_ROOT/bib-output"
+
+          (cd "$asset_dir" && sha256sum "$iso_name" > "$iso_name.sha256")
+          split -b 1900M -d -a 2 "$asset_dir/$iso_name" "$asset_dir/$iso_name.part-"
+          (cd "$asset_dir" && sha256sum "$iso_name".part-* > parts.sha256)
+          rm -f "$asset_dir/$iso_name"
+
+          cp .github/scripts/iso/download-iso.sh \
+             .github/scripts/iso/download-iso.ps1 \
+             .github/scripts/iso/download-iso.cmd \
+             "$asset_dir/"
+
+          cat > "$asset_dir/iso-README.txt" <<EOF
+          Fedora bootc KDE ${IMAGE_VERSION}
+
+          GitHub 限制单个 Release 资产最大 2 GiB，因此 ISO 被拆分为 .iso.part-* 分卷。
+
+          Linux/macOS:
+            下载 download-iso.sh，然后运行: bash download-iso.sh
+          Windows:
+            下载 download-iso.cmd，双击运行；缺少 download-iso.ps1 时会自动下载
+          手动合并:
+            cat *.iso.part-* > fedora-bootc-kde.iso
+            sha256sum -c fedora-bootc-kde.iso.sha256
+
+          合并后的 ISO 可直接复制到 Ventoy U 盘启动安装。
+          EOF
+
+          ls -lh "$asset_dir"
+
+      - name: Upload ISO to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "build-$IMAGE_VERSION" "$BIB_ROOT/assets"/* --clobber
+
+      - name: Remove old ISO assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          kept=0
+          while IFS= read -r tag; do
+            assets=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
+            if ! grep -q '\.iso\.part-' <<< "$assets"; then
+              continue
+            fi
+            kept=$((kept + 1))
+            if [ "$kept" -le 3 ]; then
+              continue
+            fi
+            while IFS= read -r name; do
+              case "$name" in
+                *.iso.part-*|*.iso.sha256|parts.sha256|iso-README.txt|download-iso.sh|download-iso.ps1|download-iso.cmd)
+                  echo "Deleting $tag/$name"
+                  gh release delete-asset "$tag" "$name" --yes
+                  ;;
+              esac
+            done <<< "$assets"
+          done < <(gh release list --limit 100 --json tagName --jq '.[].tagName')
+
+      - name: Write job summary
+        run: |
+          parts=$(find "$BIB_ROOT/assets" -name '*.iso.part-*' | wc -l | tr -d ' ')
+          {
+            echo "### Fedora bootc KDE ISO"
+            echo "- ISO: \`fedora-bootc-kde-${IMAGE_VERSION}-x86_64.iso\`"
+            echo "- Parts: ${parts}"
+            echo "- Release: \`build-${IMAGE_VERSION}\`"
+            echo "- Download: \`download-iso.sh\` / \`download-iso.cmd\`"
+          } >> "$GITHUB_STEP_SUMMARY"
