@@ -55,9 +55,9 @@ FROM base
 # 安装 KDE Plasma 桌面环境。
 # 该环境已包含 base-graphical、fonts、multimedia、hardware-support、
 # networkmanager-submodules、printing、guest-desktop-agents、firefox 等组。
-# 排除 IBus，避免与 Fcitx5 同时安装和启动。
+# 排除 IBus 主程序，保留 KDE 依赖的 ibus-libs，避免 IBus 与 Fcitx5 同时启动。
 RUN dnf makecache --refresh && dnf environment install -y \
-        --exclude='ibus*' \
+        --exclude=ibus \
         kde-desktop-environment \
     && dnf clean all
 
