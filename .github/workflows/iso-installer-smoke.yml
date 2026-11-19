@@ -1,0 +1,94 @@
+name: ISO installer smoke
+
+# 只构建 iso/Containerfile 的安装器镜像并做契约自检：不产出 ISO、不创建 Release。
+# 用于在云端快速验证安装器容器能否构建；完整 ISO 流程见 iso.yml。
+
+on:
+    workflow_dispatch:
+        inputs:
+            payload_imgref:
+                description: "PAYLOAD_IMGREF（写入 interactive-defaults.ks，不实际拉取）"
+                required: false
+                default: "ghcr.io/linkcccp/fedora-bootc:latest"
+            target_imgref:
+                description: "TARGET_IMGREF（安装后系统跟踪的 ref）"
+                required: false
+                default: "ghcr.io/linkcccp/fedora-bootc:latest"
+
+permissions:
+    contents: read
+
+concurrency:
+    group: iso-installer-smoke-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    installer:
+        runs-on: ubuntu-24.04
+        timeout-minutes: 45
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v5
+
+            - name: Ensure Podman is installed
+              run: |
+                  if ! command -v podman >/dev/null 2>&1; then
+                    sudo apt-get update
+                    sudo apt-get install --no-install-recommends -y podman
+                  fi
+
+            - name: Record tool versions
+              run: |
+                  podman --version
+                  podman version
+
+            - name: Guard against heredoc
+              run: |
+                  if grep -vE '^[[:space:]]*#' iso/Containerfile | grep -n '<<'; then
+                    echo "::error::iso/Containerfile 仍包含 heredoc 语法，宿主 buildah 可能不支持"
+                    exit 1
+                  fi
+
+            - name: Build installer container
+              env:
+                  PAYLOAD_IMGREF: ${{ inputs.payload_imgref }}
+                  TARGET_IMGREF: ${{ inputs.target_imgref }}
+              run: |
+                  set -o pipefail
+                  sudo podman build --pull=missing \
+                    --build-arg "PAYLOAD_IMGREF=$PAYLOAD_IMGREF" \
+                    --build-arg "TARGET_IMGREF=$TARGET_IMGREF" \
+                    --file iso/Containerfile \
+                    --tag localhost/fedora-bootc-installer:smoke \
+                    . 2>&1 | tee installer-build.log
+
+            - name: Check installer container contract
+              run: |
+                  sudo podman run --rm localhost/fedora-bootc-installer:smoke bash -eu -c '
+                    cat /usr/lib/image-builder/bootc/iso.yaml
+                    cat /usr/share/anaconda/interactive-defaults.ks
+                    for tool in podman mksquashfs xorriso implantisomd5 grub2-mkimage python3; do
+                      command -v "$tool"
+                    done
+                    ls -l /usr/lib/modules/*/vmlinuz /usr/lib/modules/*/initramfs.img
+                    ls -d /boot/efi/EFI/*
+                    test -d /usr/lib/grub/i386-pc
+                  '
+
+            - name: Write job summary
+              run: |
+                  {
+                    echo "### Installer container smoke"
+                    echo "- Base: \`quay.io/fedora/fedora-bootc:45\`"
+                    echo "- PAYLOAD_IMGREF: \`${{ inputs.payload_imgref }}\`"
+                    echo "- TARGET_IMGREF: \`${{ inputs.target_imgref }}\`"
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Upload build log on failure
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: installer-smoke-log-${{ github.run_id }}
+                  path: installer-build.log
+                  retention-days: 7
+                  if-no-files-found: warn
