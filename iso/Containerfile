@@ -1,0 +1,125 @@
+# 交互式 Anaconda 安装器容器，仅作为 image-builder 的 --bootc-ref 输入，
+# 不是最终交付镜像，不要推送到 ghcr.io/linkcccp/fedora-bootc。
+#
+# 背景：Fedora 45 把发行的仓库配置从 /etc/yum.repos.d 移到 /usr/share/dnf5/repos.d，
+# 而 legacy 的 `bootc-image-builder --type anaconda-iso` 仍按 /etc/yum.repos.d 读取仓库，
+# 导致 depsolve 看到 0 个仓库、installer 包全部 missing（上游 issue osbuild/image-builder#2704）。
+# 因此改用 image-builder 的 bootc-generic-iso：安装器环境由本文件自行定义，
+# 仓库布局、dracut、Anaconda 环境调整全部显式声明。
+#
+# 该镜像只在 GitHub Actions 的 iso job 中构建（iso.yml → Build installer container），
+# 本地不参与构建；需要验证时使用 Actions 页面的 workflow_dispatch 手动运行。
+#
+# 这里统一用 `RUN cat <<'EOF'` 而不是 `COPY <<EOF`：前者只依赖容器内的 shell，
+# 后者的 heredoc 语法需要较新的 buildah 前端。
+
+ARG BASE_IMAGE=quay.io/fedora/fedora-bootc:45
+FROM ${BASE_IMAGE}
+
+# ISO 内嵌 payload 的 ref。用 containers-storage: 从 ISO 内的容器存储读取，
+# 必须与 image-builder 的 --bootc-installer-payload-ref 完全一致，安装时才不需要联网。
+ARG PAYLOAD_IMGREF=ghcr.io/linkcccp/fedora-bootc:latest
+
+# 安装完成后系统跟踪的镜像 ref，等价于旧 config.toml 里 %post 的
+# `bootc switch --mutate-in-place --transport registry ghcr.io/linkcccp/fedora-bootc:latest`。
+ARG TARGET_IMGREF=ghcr.io/linkcccp/fedora-bootc:latest
+
+# 安装 Anaconda 与生成 ISO 所需的工具，同时补齐 generic-iso 对容器的要求：
+# podman、mksquashfs、xorriso、implantisomd5、grub2-mkimage、python。
+# 注意：必须在下面 `mv /usr/share/dnf5/repos.d` 之前完成所有 dnf 操作，
+# 否则容器内将没有可用仓库。
+RUN dnf5 install -y \
+        anaconda \
+        anaconda-install-img-deps \
+        anaconda-dracut \
+        dracut-config-generic \
+        dracut-network \
+        net-tools \
+        grub2-efi-x64-cdboot \
+        grub2-common \
+        grub2-pc-modules \
+        plymouth \
+        default-fonts-core-sans \
+        default-fonts-other-sans \
+        google-noto-sans-cjk-fonts \
+        xorriso \
+        squashfs-tools \
+        isomd5sum \
+        jq \
+    && dnf5 clean all
+
+# generic-iso 要求 UEFI 引导文件位于 /boot/efi/EFI/$VENDOR。
+RUN mkdir -p /boot/efi && cp -ra /usr/lib/efi/*/*/EFI /boot/efi
+
+# ISO 的 GRUB 菜单与内核参数。label 必须与 inst.stage2=hd:LABEL= 完全一致。
+RUN mkdir -p /usr/lib/image-builder/bootc
+RUN cat <<'EOF' > /usr/lib/image-builder/bootc/iso.yaml
+label: "Fedora-bootc-kde"
+grub2:
+  entries:
+    - name: "Install Fedora bootc KDE"
+      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Fedora-bootc-kde console=tty0 inst.graphical selinux=0 rhgb quiet"
+      initrd: "/images/pxeboot/initrd.img"
+EOF
+
+# 让 Anaconda 进入 bootc 安装模式。
+# source 指向 ISO 内嵌的 payload（containers-storage，离线安装）；
+# target 决定安装后系统跟踪的 ref（带 transport 前缀会被拒绝）。
+RUN test -n "${PAYLOAD_IMGREF}" && test -n "${TARGET_IMGREF}"
+RUN cat <<EOF > /usr/share/anaconda/interactive-defaults.ks
+bootc --source-imgref containers-storage:${PAYLOAD_IMGREF} --target-imgref ${TARGET_IMGREF}
+EOF
+
+# 复刻 lorax 对 Anaconda 运行环境的最小调整。
+RUN set -eux; \
+    echo "install:x:0:0:root:/root:/usr/libexec/anaconda/run-anaconda" >> /etc/passwd; \
+    echo "install::14438:0:99999:7:::" >> /etc/shadow; \
+    passwd -d root
+
+# 把 dnf5 的仓库配置移到 anaconda.repos.d：Anaconda 只从这些目录读取安装源，
+# 同时保证安装器仓库不会泄漏进安装后的 bootc 系统。
+RUN set -eux; \
+    mv /usr/share/anaconda/list-harddrives-stub /usr/bin/list-harddrives; \
+    mv /usr/share/dnf5/repos.d /etc/anaconda.repos.d; \
+    ln -s /lib/systemd/system/anaconda.target /etc/systemd/system/default.target; \
+    rm -v /usr/lib/systemd/system-generators/systemd-gpt-auto-generator; \
+    ln -s /usr/lib/systemd/system/anaconda-shell@.service /usr/lib/systemd/system/autovt@.service
+
+RUN mkdir -p /usr/lib/systemd/logind.conf.d
+RUN cat <<'EOF' > /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
+[Login]
+ReserveVT=2
+EOF
+
+# 重建 initramfs 并加入 anaconda 模块。
+RUN set -eux; \
+    mkdir -p "$(realpath /root)"; \
+    kernel=$(kernel-install list --json pretty | jq -r '.[] | select(.has_kernel == true) | .version'); \
+    test -n "$kernel"; \
+    DRACUT_NO_XATTR=1 dracut --force -v --zstd --reproducible --no-hostonly \
+        --add "anaconda" \
+        "/usr/lib/modules/${kernel}/initramfs.img" "${kernel}"
+
+# Anaconda 以 root 运行，允许 root 会话下的 pipewire。
+RUN mkdir -p /etc/systemd/user/pipewire.service.d /etc/systemd/user/pipewire.socket.d
+RUN cat <<'EOF' > /etc/systemd/user/pipewire.service.d/allowroot.conf
+[Unit]
+ConditionUser=
+EOF
+RUN cat <<'EOF' > /etc/systemd/user/pipewire.socket.d/allowroot.conf
+[Unit]
+ConditionUser=
+EOF
+
+# 构建期自检：generic-iso 的容器契约缺任何一项都直接失败，而不是等到出 ISO 阶段。
+RUN set -eux; \
+    test -s /usr/lib/image-builder/bootc/iso.yaml; \
+    test -s /usr/share/anaconda/interactive-defaults.ks; \
+    cat /usr/lib/image-builder/bootc/iso.yaml; \
+    cat /usr/share/anaconda/interactive-defaults.ks; \
+    for tool in podman mksquashfs xorriso implantisomd5 grub2-mkimage python3; do \
+        command -v "$tool"; \
+    done; \
+    ls -l /usr/lib/modules/*/vmlinuz /usr/lib/modules/*/initramfs.img; \
+    ls -d /boot/efi/EFI/*; \
+    test -d /usr/lib/grub/i386-pc

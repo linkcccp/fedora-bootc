@@ -1,419 +1,524 @@
 name: ISO
 
 on:
-  push:
-    tags:
-      - 'Release-*'
-      - 'release-*'
-  schedule:
-    # 每 7 天北京时间周一 11:00（UTC 周一 03:00）构建 Release ISO。
-    - cron: '0 3 * * 1'
+    push:
+        tags:
+            - "Release-*"
+            - "release-*"
+    schedule:
+        # 每 7 天北京时间周一 11:00（UTC 周一 03:00）构建 Release ISO。
+        - cron: "0 3 * * 1"
+    # 手动触发：在 Actions 页面直接运行即可在云端验证整条 ISO 流程，
+    # 无需本地 podman；会生成 release-<时间戳> 的 Release 与 ISO 资产。
+    workflow_dispatch:
 
 permissions:
-  contents: read
+    contents: read
 
 concurrency:
-  group: iso-${{ github.ref }}
-  cancel-in-progress: false
+    group: iso-${{ github.ref }}
+    cancel-in-progress: false
 
 jobs:
-  prepare:
-    runs-on: ubuntu-24.04
-    outputs:
-      version: ${{ steps.meta.outputs.version }}
-      release_tag: ${{ steps.meta.outputs.release_tag }}
-      image_tag: ${{ steps.meta.outputs.image_tag }}
-      image_name: ${{ steps.meta.outputs.image_name }}
-    steps:
-      - name: Resolve release metadata
-        id: meta
-        run: |
-          image_name=$(printf 'ghcr.io/%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            tag="$GITHUB_REF_NAME"
-          else
-            tag="release-$(TZ=Asia/Shanghai date +%Y.%m.%d.%H%M)"
-          fi
-          case "$tag" in
-            release-*|Release-*) ;;
-            *)
-              echo "::error::Invalid Release tag: $tag (expected release-* or Release-*)"
-              exit 1
-              ;;
-          esac
-          if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$'; then
-            echo "::error::Invalid Docker tag: $tag"
-            exit 1
-          fi
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "image_tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "image_name=$image_name" >> "$GITHUB_OUTPUT"
+    prepare:
+        runs-on: ubuntu-24.04
+        outputs:
+            version: ${{ steps.meta.outputs.version }}
+            release_tag: ${{ steps.meta.outputs.release_tag }}
+            image_tag: ${{ steps.meta.outputs.image_tag }}
+            image_name: ${{ steps.meta.outputs.image_name }}
+        steps:
+            - name: Resolve release metadata
+              id: meta
+              run: |
+                  image_name=$(printf 'ghcr.io/%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+                  if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+                    tag="$GITHUB_REF_NAME"
+                  else
+                    tag="release-$(TZ=Asia/Shanghai date +%Y.%m.%d.%H%M)"
+                  fi
+                  case "$tag" in
+                    release-*|Release-*) ;;
+                    *)
+                      echo "::error::Invalid Release tag: $tag (expected release-* or Release-*)"
+                      exit 1
+                      ;;
+                  esac
+                  if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$'; then
+                    echo "::error::Invalid Docker tag: $tag"
+                    exit 1
+                  fi
+                  echo "version=$tag" >> "$GITHUB_OUTPUT"
+                  echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
+                  echo "image_tag=$tag" >> "$GITHUB_OUTPUT"
+                  echo "image_name=$image_name" >> "$GITHUB_OUTPUT"
 
-  image:
-    needs: prepare
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      packages: write
-    env:
-      IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}
-      IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Free up disk space
-        run: |
-          sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /opt/ghc \
-            /opt/hostedtoolcache/CodeQL
-          sudo apt-get clean
-          df -h /
-
-      - name: Ensure Podman is installed
-        run: |
-          if ! command -v podman >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install --no-install-recommends -y podman
-          fi
-
-      - name: Log in to GitHub Container Registry
+    image:
+        needs: prepare
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+            packages: write
         env:
-          REGISTRY_USERNAME: ${{ github.actor }}
-          REGISTRY_PASSWORD: ${{ github.token }}
-          REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
-        run: printf '%s' "$REGISTRY_PASSWORD" | podman login ghcr.io --authfile "$REGISTRY_AUTH_FILE" --username "$REGISTRY_USERNAME" --password-stdin
+            IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}
+            IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v5
 
-      - name: Resolve Clash Verge RPM
-        id: clash
+            - name: Free up disk space
+              run: |
+                  sudo rm -rf \
+                    /usr/share/dotnet \
+                    /usr/local/lib/android \
+                    /opt/ghc \
+                    /opt/hostedtoolcache/CodeQL
+                  sudo apt-get clean
+                  df -h /
+
+            - name: Ensure Podman is installed
+              run: |
+                  if ! command -v podman >/dev/null 2>&1; then
+                    sudo apt-get update
+                    sudo apt-get install --no-install-recommends -y podman
+                  fi
+
+            - name: Log in to GitHub Container Registry
+              env:
+                  REGISTRY_USERNAME: ${{ github.actor }}
+                  REGISTRY_PASSWORD: ${{ github.token }}
+                  REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+              run: printf '%s' "$REGISTRY_PASSWORD" | podman login ghcr.io --authfile "$REGISTRY_AUTH_FILE" --username "$REGISTRY_USERNAME" --password-stdin
+
+            - name: Resolve Clash Verge RPM
+              id: clash
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  url=$(gh api repos/clash-verge-rev/clash-verge-rev/releases/latest \
+                    --jq '[.assets[] | select(.name | endswith(".x86_64.rpm"))][0].browser_download_url // empty')
+                  test -n "$url"
+                  echo "url=$url" >> "$GITHUB_OUTPUT"
+
+            - name: Resolve v2rayN RPM
+              id: v2rayn
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  url=$(gh api repos/2dust/v2rayN/releases/latest \
+                    --jq '[.assets[] | select(.name == "v2rayN-linux-rhel-64.rpm")][0].browser_download_url // empty')
+                  test -n "$url"
+                  echo "url=$url" >> "$GITHUB_OUTPUT"
+
+            - name: Build image
+              env:
+                  CLASH_VERGE_RPM_URL: ${{ steps.clash.outputs.url }}
+                  V2RAYN_RPM_URL: ${{ steps.v2rayn.outputs.url }}
+              run: |
+                  podman build --pull=always \
+                    --build-arg "CLASH_VERGE_RPM_URL=$CLASH_VERGE_RPM_URL" \
+                    --build-arg "V2RAYN_RPM_URL=$V2RAYN_RPM_URL" \
+                    --file Containerfile --tag "$IMAGE_NAME:$IMAGE_TAG" .
+
+            - name: Push image
+              env:
+                  REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+              run: |
+                  push_image() {
+                    ref="$1"
+                    for attempt in 1 2 3; do
+                      if podman push --authfile "$REGISTRY_AUTH_FILE" "$ref"; then
+                        return 0
+                      fi
+                      if [ "$attempt" -lt 3 ]; then
+                        echo "::warning::Push of $ref failed (attempt $attempt/3); retrying in 15s..."
+                        sleep 15
+                      fi
+                    done
+                    return 1
+                  }
+
+                  push_image "$IMAGE_NAME:$IMAGE_TAG"
+                  podman tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest"
+                  push_image "$IMAGE_NAME:latest"
+
+            - name: Write job summary
+              run: |
+                  {
+                    echo "### Container image"
+                    echo "- Image: \`$IMAGE_NAME:$IMAGE_TAG\`"
+                    echo "- Latest: \`$IMAGE_NAME:latest\`"
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+    iso:
+        needs: [prepare, image]
+        runs-on: ubuntu-24.04
+        timeout-minutes: 300
+        permissions:
+            contents: write
+            packages: read
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          url=$(gh api repos/clash-verge-rev/clash-verge-rev/releases/latest \
-            --jq '[.assets[] | select(.name | endswith(".x86_64.rpm"))][0].browser_download_url // empty')
-          test -n "$url"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+            IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}
+            IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+            VERSION: ${{ needs.prepare.outputs.version }}
+            RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+            INSTALLER_IMAGE: localhost/fedora-bootc-installer:${{ needs.prepare.outputs.image_tag }}
+            # 可复现性 TODO：验证通过后把 :latest 固定为 digest
+            # （ghcr.io/osbuild/image-builder-cli@sha256:...）。
+            IMAGE_BUILDER_IMAGE: ghcr.io/osbuild/image-builder-cli:latest
+            GH_TOKEN: ${{ github.token }}
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v5
 
-      - name: Resolve v2rayN RPM
-        id: v2rayn
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          url=$(gh api repos/2dust/v2rayN/releases/latest \
-            --jq '[.assets[] | select(.name == "v2rayN-linux-rhel-64.rpm")][0].browser_download_url // empty')
-          test -n "$url"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+            - name: Validate ISO download scripts
+              run: |
+                  bash -n .github/scripts/iso/download-iso.sh
+                  pwsh -NoProfile -Command '
+                    $tokens = $null
+                    $errors = $null
+                    [System.Management.Automation.Language.Parser]::ParseFile(
+                      ".github/scripts/iso/download-iso.ps1",
+                      [ref]$tokens,
+                      [ref]$errors
+                    ) | Out-Null
+                    if ($errors.Count -gt 0) {
+                      $errors | ForEach-Object { Write-Error $_.Message }
+                      exit 1
+                    }
+                  '
 
-      - name: Build image
-        env:
-          CLASH_VERGE_RPM_URL: ${{ steps.clash.outputs.url }}
-          V2RAYN_RPM_URL: ${{ steps.v2rayn.outputs.url }}
-        run: |
-          podman build --pull=always \
-            --build-arg "CLASH_VERGE_RPM_URL=$CLASH_VERGE_RPM_URL" \
-            --build-arg "V2RAYN_RPM_URL=$V2RAYN_RPM_URL" \
-            --file Containerfile --tag "$IMAGE_NAME:$IMAGE_TAG" .
+            - name: Free up disk space
+              run: |
+                  sudo rm -rf \
+                    /usr/share/dotnet \
+                    /usr/local/lib/android \
+                    /usr/local/.ghcup \
+                    /opt/ghc \
+                    /opt/hostedtoolcache/CodeQL \
+                    /usr/local/share/boost
+                  sudo apt-get clean
+                  sudo docker image prune --all --force || true
+                  df -h
 
-      - name: Push image
-        env:
-          REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
-        run: |
-          push_image() {
-            ref="$1"
-            for attempt in 1 2 3; do
-              if podman push --authfile "$REGISTRY_AUTH_FILE" "$ref"; then
-                return 0
-              fi
-              if [ "$attempt" -lt 3 ]; then
-                echo "::warning::Push of $ref failed (attempt $attempt/3); retrying in 15s..."
-                sleep 15
-              fi
-            done
-            return 1
-          }
+            - name: Ensure Podman and ISO tools are installed
+              run: |
+                  packages=()
+                  command -v podman >/dev/null 2>&1 || packages+=(podman)
+                  command -v xorriso >/dev/null 2>&1 || packages+=(xorriso)
+                  command -v unsquashfs >/dev/null 2>&1 || packages+=(squashfs-tools)
+                  if [ "${#packages[@]}" -gt 0 ]; then
+                    sudo apt-get update
+                    sudo apt-get install --no-install-recommends -y "${packages[@]}"
+                  fi
 
-          push_image "$IMAGE_NAME:$IMAGE_TAG"
-          podman tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest"
-          push_image "$IMAGE_NAME:latest"
+            - name: Prepare build storage
+              run: |
+                  if mountpoint -q /mnt; then
+                    root=/mnt
+                  else
+                    root="$RUNNER_TEMP"
+                  fi
+                  echo "BIB_ROOT=$root" >> "$GITHUB_ENV"
+                  sudo rm -rf "$root/bib-output" "$root/bib-cache" "$root/containers"
+                  sudo mkdir -p "$root/bib-output" "$root/bib-cache" "$root/containers"
+                  sudo chown "$(id -u):$(id -g)" "$root/bib-output" "$root/bib-cache"
+                  sudo mkdir -p /var/lib/containers/storage
+                  sudo mount --bind "$root/containers" /var/lib/containers/storage
+                  # generic-iso 比 legacy anaconda-iso 多出安装器容器（Anaconda 等）和
+                  # ISO 内嵌 payload 的容器存储副本，预留空间从 50 GiB 提高到 60 GiB。
+                  available=$(df -Pk "$root" | awk 'NR == 2 { print $4 }')
+                  if [ "$available" -lt $((60 * 1024 * 1024)) ]; then
+                    echo "::error::Not enough free space on $root: $((available / 1024 / 1024)) GiB available, need at least 60 GiB"
+                    exit 1
+                  fi
+                  df -h "$root"
 
-      - name: Write job summary
-        run: |
-          {
-            echo "### Container image"
-            echo "- Image: \`$IMAGE_NAME:$IMAGE_TAG\`"
-            echo "- Latest: \`$IMAGE_NAME:latest\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+            - name: Log in to GitHub Container Registry
+              env:
+                  REGISTRY_USERNAME: ${{ github.actor }}
+                  REGISTRY_PASSWORD: ${{ github.token }}
+              run: printf '%s' "$REGISTRY_PASSWORD" | sudo podman login ghcr.io --username "$REGISTRY_USERNAME" --password-stdin
 
-  iso:
-    needs: [prepare, image]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 240
-    permissions:
-      contents: write
-      packages: read
-    env:
-      IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}
-      IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
-      VERSION: ${{ needs.prepare.outputs.version }}
-      RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
-      BIB_IMAGE: quay.io/centos-bootc/bootc-image-builder:latest
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
+            - name: Pull image
+              run: |
+                  for attempt in 1 2 3; do
+                    if sudo podman pull "$IMAGE_NAME:$IMAGE_TAG"; then
+                      exit 0
+                    fi
+                    echo "::warning::Pull of $IMAGE_NAME:$IMAGE_TAG failed (attempt $attempt/3); retrying in 15s..."
+                    sleep 15
+                  done
+                  exit 1
 
-      - name: Validate ISO download scripts
-        run: |
-          bash -n .github/scripts/iso/download-iso.sh
-          pwsh -NoProfile -Command '
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-              ".github/scripts/iso/download-iso.ps1",
-              [ref]$tokens,
-              [ref]$errors
-            ) | Out-Null
-            if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Error $_.Message }
-              exit 1
-            }
-          '
+            - name: Record tool versions
+              run: |
+                  podman --version
+                  sudo podman run --rm --pull=missing "$IMAGE_BUILDER_IMAGE" version || true
 
-      - name: Free up disk space
-        run: |
-          sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /usr/local/.ghcup \
-            /opt/ghc \
-            /opt/hostedtoolcache/CodeQL \
-            /usr/local/share/boost
-          sudo apt-get clean
-          sudo docker image prune --all --force || true
-          df -h
+            - name: Build installer container
+              run: |
+                  set -o pipefail
+                  sudo podman build --pull=missing \
+                    --build-arg "PAYLOAD_IMGREF=$IMAGE_NAME:$IMAGE_TAG" \
+                    --build-arg "TARGET_IMGREF=$IMAGE_NAME:latest" \
+                    --file iso/Containerfile \
+                    --tag "$INSTALLER_IMAGE" \
+                    . 2>&1 | tee "$BIB_ROOT/installer-build.log"
 
-      - name: Ensure Podman is installed
-        run: |
-          if ! command -v podman >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install --no-install-recommends -y podman
-          fi
+            - name: Check installer container contract
+              run: |
+                  sudo podman run --rm "$INSTALLER_IMAGE" bash -eu -c '
+                    cat /usr/lib/image-builder/bootc/iso.yaml
+                    cat /usr/share/anaconda/interactive-defaults.ks
+                    for tool in podman mksquashfs xorriso implantisomd5 grub2-mkimage python3; do
+                      command -v "$tool"
+                    done
+                    ls -l /usr/lib/modules/*/vmlinuz /usr/lib/modules/*/initramfs.img
+                    ls -d /boot/efi/EFI/*
+                  '
 
-      - name: Prepare build storage
-        run: |
-          if mountpoint -q /mnt; then
-            root=/mnt
-          else
-            root="$RUNNER_TEMP"
-          fi
-          echo "BIB_ROOT=$root" >> "$GITHUB_ENV"
-          sudo rm -rf "$root/bib-output" "$root/containers"
-          sudo mkdir -p "$root/bib-output" "$root/containers"
-          sudo chown "$(id -u):$(id -g)" "$root/bib-output"
-          sudo mkdir -p /var/lib/containers/storage
-          sudo mount --bind "$root/containers" /var/lib/containers/storage
-          available=$(df -Pk "$root" | awk 'NR == 2 { print $4 }')
-          if [ "$available" -lt $((50 * 1024 * 1024)) ]; then
-            echo "::error::Not enough free space on $root: $((available / 1024 / 1024)) GiB available, need at least 50 GiB"
-            exit 1
-          fi
-          df -h "$root"
+            - name: Build ISO
+              run: |
+                  set -o pipefail
+                  # 不再使用 bootc-image-builder 的 anaconda-iso：Fedora 45 把仓库配置移到
+                  # /usr/share/dnf5/repos.d，legacy 路径会读到 0 个仓库而 depsolve 失败。
+                  # 现在由 iso/Containerfile 定义安装器环境，这里只负责生成 ISO。
+                  # btrfs 与旧行为的 --rootfs btrfs 保持一致；官方实测值 ext4，可随时切换。
+                  sudo podman run --rm --privileged --pull=missing \
+                    --security-opt label=type:unconfined_t \
+                    -v "$BIB_ROOT/bib-output:/output" \
+                    -v /var/lib/containers/storage:/var/lib/containers/storage \
+                    "$IMAGE_BUILDER_IMAGE" \
+                    build \
+                    --output-dir /output \
+                    --bootc-ref "$INSTALLER_IMAGE" \
+                    --bootc-installer-payload-ref "$IMAGE_NAME:$IMAGE_TAG" \
+                    --bootc-default-fs btrfs \
+                    --arch x86_64 \
+                    bootc-generic-iso 2>&1 | tee "$BIB_ROOT/image-builder.log"
 
-      - name: Log in to GitHub Container Registry
-        env:
-          REGISTRY_USERNAME: ${{ github.actor }}
-          REGISTRY_PASSWORD: ${{ github.token }}
-        run: printf '%s' "$REGISTRY_PASSWORD" | sudo podman login ghcr.io --username "$REGISTRY_USERNAME" --password-stdin
+            - name: Verify ISO contents
+              run: |
+                  iso=$(sudo find "$BIB_ROOT/bib-output" -type f -name '*.iso' -print -quit)
+                  test -n "$iso"
+                  echo "ISO: $iso ($(sudo du -h "$iso" | cut -f1))"
+                  sudo xorriso -indev "$iso" -report_el_torito plain
+                  listing=$(sudo xorriso -indev "$iso" -find / -type f -exec lsdl 2>/dev/null)
+                  for path in /images/pxeboot/vmlinuz /images/pxeboot/initrd.img /LiveOS/squashfs.img; do
+                    if ! grep -q "$path" <<<"$listing"; then
+                      echo "::error::ISO is missing $path"
+                      exit 1
+                    fi
+                  done
+                  # 确认 ISO 内确实是 Anaconda 安装环境，并且内嵌了 payload 容器存储。
+                  sudo mkdir -p "$BIB_ROOT/verify"
+                  sudo osirrox -indev "$iso" -extract /LiveOS/squashfs.img "$BIB_ROOT/verify/squashfs.img"
+                  unsquashfs -l "$BIB_ROOT/verify/squashfs.img" > "$BIB_ROOT/verify/squashfs.txt"
+                  grep -qE 'usr/share/anaconda/interactive-defaults\.ks' "$BIB_ROOT/verify/squashfs.txt"
+                  grep -qE 'var/lib/containers/storage' "$BIB_ROOT/verify/squashfs.txt"
+                  grep -E 'usr/(libexec|share)/anaconda(/|$)|interactive-defaults\.ks' \
+                    "$BIB_ROOT/verify/squashfs.txt" | head -n 20
+                  sudo rm -rf "$BIB_ROOT/verify"
 
-      - name: Pull image
-        run: sudo podman pull "$IMAGE_NAME:$IMAGE_TAG"
+            - name: Export package list
+              run: |
+                  mkdir -p "$RUNNER_TEMP/out"
+                  sudo podman run --rm "$IMAGE_NAME:$IMAGE_TAG" \
+                    rpm -qa --qf '%{NAME}.%{ARCH}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\n' \
+                    | LC_ALL=C sort > "$RUNNER_TEMP/curr.tsv"
+                  echo "Packages: $(wc -l < "$RUNNER_TEMP/curr.tsv")"
 
-      - name: Build ISO
-        run: |
-          sudo podman run --rm --privileged --pull=newer \
-            --security-opt label=type:unconfined_t \
-            -v "$PWD/iso/config.toml:/config.toml:ro" \
-            -v "$BIB_ROOT/bib-output:/output" \
-            -v /var/lib/containers/storage:/var/lib/containers/storage \
-            "$BIB_IMAGE" \
-            --type anaconda-iso \
-            --rootfs btrfs \
-            --use-librepo=True \
-            --target-arch x86_64 \
-            --config /config.toml \
-            "$IMAGE_NAME:$IMAGE_TAG"
+            - name: Fetch previous package list
+              id: previous
+              run: |
+                  mkdir -p "$RUNNER_TEMP/previous"
+                  prev_tag=""
+                  while IFS= read -r tag; do
+                    [ "$tag" = "$RELEASE_TAG" ] && continue
+                    names=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
+                    if ! grep -qx 'packages.tsv' <<< "$names"; then
+                      continue
+                    fi
+                    rm -f "$RUNNER_TEMP/previous/packages.tsv"
+                    if gh release download "$tag" --pattern packages.tsv --dir "$RUNNER_TEMP/previous"; then
+                      prev_tag="$tag"
+                      echo "Previous package list: $tag"
+                      break
+                    fi
+                    echo "::warning::Failed to download packages.tsv from $tag"
+                  done < <(gh release list --limit 100 --exclude-drafts --json tagName --jq '.[].tagName')
+                  echo "prev_tag=$prev_tag" >> "$GITHUB_OUTPUT"
 
-      - name: Export package list
-        run: |
-          mkdir -p "$RUNNER_TEMP/out"
-          sudo podman run --rm "$IMAGE_NAME:$IMAGE_TAG" \
-            rpm -qa --qf '%{NAME}.%{ARCH}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\n' \
-            | LC_ALL=C sort > "$RUNNER_TEMP/curr.tsv"
-          echo "Packages: $(wc -l < "$RUNNER_TEMP/curr.tsv")"
+            - name: Generate package changelog
+              env:
+                  PREV_TAG: ${{ steps.previous.outputs.prev_tag }}
+              run: |
+                  prev_arg=""
+                  if [ -s "$RUNNER_TEMP/previous/packages.tsv" ]; then
+                    prev_arg="/data/previous/packages.tsv"
+                  fi
 
-      - name: Fetch previous package list
-        id: previous
-        run: |
-          mkdir -p "$RUNNER_TEMP/previous"
-          prev_tag=""
-          while IFS= read -r tag; do
-            [ "$tag" = "$RELEASE_TAG" ] && continue
-            names=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
-            if ! grep -qx 'packages.tsv' <<< "$names"; then
-              continue
-            fi
-            rm -f "$RUNNER_TEMP/previous/packages.tsv"
-            if gh release download "$tag" --pattern packages.tsv --dir "$RUNNER_TEMP/previous"; then
-              prev_tag="$tag"
-              echo "Previous package list: $tag"
-              break
-            fi
-            echo "::warning::Failed to download packages.tsv from $tag"
-          done < <(gh release list --limit 100 --exclude-drafts --json tagName --jq '.[].tagName')
-          echo "prev_tag=$prev_tag" >> "$GITHUB_OUTPUT"
+                  sudo podman run --rm --user "$(id -u):$(id -g)" \
+                    -v "$PWD/.github/scripts:/scripts:ro" \
+                    -v "$RUNNER_TEMP:/data" \
+                    -e "IMAGE_REF=${IMAGE_NAME}:${IMAGE_TAG}" \
+                    -e "VERSION=${VERSION}" \
+                    -e "PREV_TAG=${PREV_TAG}" \
+                    -e "GENERATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    -e "IMAGE_TITLE=Fedora bootc" \
+                    -e "PACKAGE_MANAGER=rpm" \
+                    "$IMAGE_NAME:$IMAGE_TAG" \
+                    bash /scripts/diff-packages.sh "$prev_arg" /data/curr.tsv /data/out
 
-      - name: Generate package changelog
-        env:
-          PREV_TAG: ${{ steps.previous.outputs.prev_tag }}
-        run: |
-          prev_arg=""
-          if [ -s "$RUNNER_TEMP/previous/packages.tsv" ]; then
-            prev_arg="/data/previous/packages.tsv"
-          fi
+            - name: Prepare release assets
+              run: |
+                  asset_dir="$BIB_ROOT/assets"
+                  sudo rm -rf "$asset_dir"
+                  sudo mkdir -p "$asset_dir"
+                  sudo chown "$(id -u):$(id -g)" "$asset_dir"
 
-          sudo podman run --rm --user "$(id -u):$(id -g)" \
-            -v "$PWD/.github/scripts:/scripts:ro" \
-            -v "$RUNNER_TEMP:/data" \
-            -e "IMAGE_REF=${IMAGE_NAME}:${IMAGE_TAG}" \
-            -e "VERSION=${VERSION}" \
-            -e "PREV_TAG=${PREV_TAG}" \
-            -e "GENERATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -e "IMAGE_TITLE=Fedora bootc" \
-            -e "PACKAGE_MANAGER=rpm" \
-            "$IMAGE_NAME:$IMAGE_TAG" \
-            bash /scripts/diff-packages.sh "$prev_arg" /data/curr.tsv /data/out
+                  # generic-iso 产物文件名固定为 install.iso，位于输出目录的子目录中，
+                  # 用 find 定位，不依赖目录名与文件名。
+                  iso_src=$(sudo find "$BIB_ROOT/bib-output" -type f -name '*.iso' -print -quit)
+                  test -n "$iso_src"
+                  iso_name="fedora-bootc-kde-${VERSION}-x86_64.iso"
+                  sudo cp "$iso_src" "$asset_dir/$iso_name"
+                  sudo chown "$(id -u):$(id -g)" "$asset_dir/$iso_name"
+                  sudo rm -rf "$BIB_ROOT/bib-output" "$BIB_ROOT/bib-cache"
 
-      - name: Prepare release assets
-        run: |
-          asset_dir="$BIB_ROOT/assets"
-          sudo rm -rf "$asset_dir"
-          sudo mkdir -p "$asset_dir"
-          sudo chown "$(id -u):$(id -g)" "$asset_dir"
+                  (cd "$asset_dir" && sha256sum "$iso_name" > "$iso_name.sha256")
+                  split -b 1900M -d -a 2 "$asset_dir/$iso_name" "$asset_dir/$iso_name.part-"
+                  (cd "$asset_dir" && sha256sum "$iso_name".part-* > parts.sha256)
+                  rm -f "$asset_dir/$iso_name"
 
-          iso_src=$(sudo find "$BIB_ROOT/bib-output" -type f -name '*.iso' -print -quit)
-          test -n "$iso_src"
-          iso_name="fedora-bootc-kde-${VERSION}-x86_64.iso"
-          sudo cp "$iso_src" "$asset_dir/$iso_name"
-          sudo chown "$(id -u):$(id -g)" "$asset_dir/$iso_name"
-          sudo rm -rf "$BIB_ROOT/bib-output"
+                  cp .github/scripts/iso/download-iso.sh \
+                     .github/scripts/iso/download-iso.ps1 \
+                     .github/scripts/iso/download-iso.cmd \
+                     "$asset_dir/"
 
-          (cd "$asset_dir" && sha256sum "$iso_name" > "$iso_name.sha256")
-          split -b 1900M -d -a 2 "$asset_dir/$iso_name" "$asset_dir/$iso_name.part-"
-          (cd "$asset_dir" && sha256sum "$iso_name".part-* > parts.sha256)
-          rm -f "$asset_dir/$iso_name"
+                  cp "$RUNNER_TEMP/out/packages.tsv" \
+                     "$RUNNER_TEMP/out/packages.json" \
+                     "$RUNNER_TEMP/out/changes.json" \
+                     "$RUNNER_TEMP/out/changes.md" \
+                     "$asset_dir/"
 
-          cp .github/scripts/iso/download-iso.sh \
-             .github/scripts/iso/download-iso.ps1 \
-             .github/scripts/iso/download-iso.cmd \
-             "$asset_dir/"
+                  cat > "$asset_dir/iso-README.txt" <<EOF
+                  Fedora bootc KDE ${VERSION}
 
-          cp "$RUNNER_TEMP/out/packages.tsv" \
-             "$RUNNER_TEMP/out/packages.json" \
-             "$RUNNER_TEMP/out/changes.json" \
-             "$RUNNER_TEMP/out/changes.md" \
-             "$asset_dir/"
+                  GitHub 限制单个 Release 资产最大 2 GiB，因此 ISO 被拆分为 .iso.part-* 分卷。
 
-          cat > "$asset_dir/iso-README.txt" <<EOF
-          Fedora bootc KDE ${VERSION}
+                  Linux/macOS:
+                    下载 download-iso.sh，然后运行: bash download-iso.sh --version ${VERSION}
+                  Windows:
+                    下载 download-iso.cmd，双击运行；缺少 download-iso.ps1 时会自动下载
+                  手动合并:
+                    cat ${iso_name}.part-* > ${iso_name}
+                    sha256sum -c ${iso_name}.sha256
 
-          GitHub 限制单个 Release 资产最大 2 GiB，因此 ISO 被拆分为 .iso.part-* 分卷。
+                  安装后的系统跟踪 ghcr.io/linkcccp/fedora-bootc:latest，更新方式见仓库 README。
+                  合并后的 ISO 可直接复制到 Ventoy U 盘启动安装。
+                  EOF
 
-          Linux/macOS:
-            下载 download-iso.sh，然后运行: bash download-iso.sh --version ${VERSION}
-          Windows:
-            下载 download-iso.cmd，双击运行；缺少 download-iso.ps1 时会自动下载
-          手动合并:
-            cat ${iso_name}.part-* > ${iso_name}
-            sha256sum -c ${iso_name}.sha256
+                  ls -lh "$asset_dir"
 
-          安装后的系统跟踪 ghcr.io/linkcccp/fedora-bootc:latest，更新方式见仓库 README。
-          合并后的 ISO 可直接复制到 Ventoy U 盘启动安装。
-          EOF
+            - name: Create or update release
+              run: |
+                  asset_dir="$BIB_ROOT/assets"
+                  if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+                    gh release upload "$RELEASE_TAG" "$asset_dir"/* --clobber
+                    if [ -s "$asset_dir/changes.md" ]; then
+                      gh release edit "$RELEASE_TAG" --latest --notes-file "$asset_dir/changes.md"
+                    else
+                      gh release edit "$RELEASE_TAG" --latest
+                    fi
+                    exit 0
+                  fi
 
-          ls -lh "$asset_dir"
+                  notes_arg=(--notes "Fedora bootc ${VERSION}")
+                  if [ -s "$asset_dir/changes.md" ]; then
+                    notes_arg=(--notes-file "$asset_dir/changes.md")
+                  fi
 
-      - name: Create or update release
-        run: |
-          asset_dir="$BIB_ROOT/assets"
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$asset_dir"/* --clobber
-            if [ -s "$asset_dir/changes.md" ]; then
-              gh release edit "$RELEASE_TAG" --latest --notes-file "$asset_dir/changes.md"
-            else
-              gh release edit "$RELEASE_TAG" --latest
-            fi
-            exit 0
-          fi
+                  if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+                    gh release create "$RELEASE_TAG" \
+                      --target "$GITHUB_SHA" \
+                      --title "Fedora bootc ${VERSION}" \
+                      "${notes_arg[@]}" \
+                      --latest \
+                      "$asset_dir"/*
+                  else
+                    gh release create "$RELEASE_TAG" \
+                      --verify-tag \
+                      --title "Fedora bootc ${VERSION}" \
+                      "${notes_arg[@]}" \
+                      --latest \
+                      "$asset_dir"/*
+                  fi
 
-          notes_arg=(--notes "Fedora bootc ${VERSION}")
-          if [ -s "$asset_dir/changes.md" ]; then
-            notes_arg=(--notes-file "$asset_dir/changes.md")
-          fi
+            - name: Remove old ISO assets
+              run: |
+                  # Keep the current release plus the two newest previous ISO releases.
+                  kept=0
+                  while IFS= read -r tag; do
+                    [ "$tag" = "$RELEASE_TAG" ] && continue
+                    assets=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
+                    if ! grep -q '\.iso\.part-' <<< "$assets"; then
+                      continue
+                    fi
+                    if [ "$kept" -lt 2 ]; then
+                      kept=$((kept + 1))
+                      continue
+                    fi
+                    while IFS= read -r name; do
+                      case "$name" in
+                        *.iso.part-*|*.iso.sha256|parts.sha256|iso-README.txt|download-iso.sh|download-iso.ps1|download-iso.cmd)
+                          echo "Deleting $tag/$name"
+                          gh release delete-asset "$tag" "$name" --yes
+                          ;;
+                      esac
+                    done <<< "$assets"
+                  done < <(gh release list --limit 100 --json tagName --jq '.[].tagName')
 
-          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            gh release create "$RELEASE_TAG" \
-              --target "$GITHUB_SHA" \
-              --title "Fedora bootc ${VERSION}" \
-              "${notes_arg[@]}" \
-              --latest \
-              "$asset_dir"/*
-          else
-            gh release create "$RELEASE_TAG" \
-              --verify-tag \
-              --title "Fedora bootc ${VERSION}" \
-              "${notes_arg[@]}" \
-              --latest \
-              "$asset_dir"/*
-          fi
+            - name: Collect failure diagnostics
+              if: failure()
+              run: |
+                  diag="$RUNNER_TEMP/diagnostics"
+                  mkdir -p "$diag"
+                  {
+                    df -h
+                    sudo podman images --digests || true
+                    sudo du -sh "$BIB_ROOT"/* 2>/dev/null || true
+                    sudo find "$BIB_ROOT/bib-output" -maxdepth 3 -ls 2>/dev/null || true
+                  } > "$diag/environment.txt" 2>&1
+                  for f in installer-build.log image-builder.log; do
+                    sudo cp "$BIB_ROOT/$f" "$diag/" 2>/dev/null || true
+                  done
+                  sudo find "$BIB_ROOT/bib-output" -maxdepth 3 -name 'manifest*.json' \
+                    -exec sudo cp {} "$diag/" \; 2>/dev/null || true
+                  sudo chown -R "$(id -u):$(id -g)" "$diag"
+                  ls -lh "$diag"
 
-      - name: Remove old ISO assets
-        run: |
-          # Keep the current release plus the two newest previous ISO releases.
-          kept=0
-          while IFS= read -r tag; do
-            [ "$tag" = "$RELEASE_TAG" ] && continue
-            assets=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
-            if ! grep -q '\.iso\.part-' <<< "$assets"; then
-              continue
-            fi
-            if [ "$kept" -lt 2 ]; then
-              kept=$((kept + 1))
-              continue
-            fi
-            while IFS= read -r name; do
-              case "$name" in
-                *.iso.part-*|*.iso.sha256|parts.sha256|iso-README.txt|download-iso.sh|download-iso.ps1|download-iso.cmd)
-                  echo "Deleting $tag/$name"
-                  gh release delete-asset "$tag" "$name" --yes
-                  ;;
-              esac
-            done <<< "$assets"
-          done < <(gh release list --limit 100 --json tagName --jq '.[].tagName')
+            - name: Upload failure diagnostics
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: iso-build-diagnostics-${{ github.run_id }}
+                  path: ${{ runner.temp }}/diagnostics
+                  retention-days: 7
+                  if-no-files-found: warn
 
-      - name: Write job summary
-        run: |
-          parts=$(find "$BIB_ROOT/assets" -name '*.iso.part-*' | wc -l | tr -d ' ')
-          {
-            echo "### Fedora bootc KDE ISO"
-            echo "- Version: \`${VERSION}\`"
-            echo "- ISO: \`fedora-bootc-kde-${VERSION}-x86_64.iso\`"
-            echo "- Parts: ${parts}"
-            echo "- Release: \`${RELEASE_TAG}\`"
-            echo "- Download: \`download-iso.sh --version ${VERSION}\` / \`download-iso.cmd\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ -s "$BIB_ROOT/assets/changes.md" ]; then
-            cat "$BIB_ROOT/assets/changes.md" >> "$GITHUB_STEP_SUMMARY"
-          fi
+            - name: Write job summary
+              run: |
+                  parts=$(find "$BIB_ROOT/assets" -name '*.iso.part-*' | wc -l | tr -d ' ')
+                  {
+                    echo "### Fedora bootc KDE ISO"
+                    echo "- Version: \`${VERSION}\`"
+                    echo "- ISO: \`fedora-bootc-kde-${VERSION}-x86_64.iso\`"
+                    echo "- Parts: ${parts}"
+                    echo "- Release: \`${RELEASE_TAG}\`"
+                    echo "- Download: \`download-iso.sh --version ${VERSION}\` / \`download-iso.cmd\`"
+                  } >> "$GITHUB_STEP_SUMMARY"
+                  if [ -s "$BIB_ROOT/assets/changes.md" ]; then
+                    cat "$BIB_ROOT/assets/changes.md" >> "$GITHUB_STEP_SUMMARY"
+                  fi
