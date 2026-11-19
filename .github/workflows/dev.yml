@@ -114,10 +114,11 @@ jobs:
           IMAGE_TAG: ${{ steps.meta.outputs.tag }}
           REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
         run: |
+          # 层使用 zstd 压缩：比默认 gzip 体积更小，便于增量拉取。
           push_image() {
             ref="$1"
             for attempt in 1 2 3; do
-              if podman push --authfile "$REGISTRY_AUTH_FILE" "$ref"; then
+              if podman push --compression-format=zstd --authfile "$REGISTRY_AUTH_FILE" "$ref"; then
                 return 0
               fi
               if [ "$attempt" -lt 3 ]; then

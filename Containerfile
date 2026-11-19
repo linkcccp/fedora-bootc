@@ -95,16 +95,20 @@ RUN set -eux; \
     fi; \
     dnf clean all
 
-# 安装简体中文语言包和 GTK 图标缓存工具；CJK 字体由 KDE 环境的 @fonts 组提供。
-RUN dnf install -y langpacks-zh_CN gtk-update-icon-cache && dnf clean all
+# 简体中文语言包、图标缓存工具与 Fcitx5 输入法。
+# CJK 字体由 KDE 环境的 @fonts 组提供。
+# 这些包按功能合并进同一个 dnf 事务，减少层数与重复写入。
+RUN dnf install -y \
+        langpacks-zh_CN \
+        gtk-update-icon-cache \
+        fcitx5 \
+        fcitx5-autostart \
+        fcitx5-chinese-addons \
+        fcitx5-configtool \
+        fcitx5-gtk \
+        fcitx5-qt \
+    && dnf clean all
 
-# 安装 Fcitx5 中文输入法和配置工具。
-RUN dnf install -y fcitx5 && dnf clean all
-RUN dnf install -y fcitx5-autostart && dnf clean all
-RUN dnf install -y fcitx5-chinese-addons && dnf clean all
-RUN dnf install -y fcitx5-configtool && dnf clean all
-RUN dnf install -y fcitx5-gtk && dnf clean all
-RUN dnf install -y fcitx5-qt && dnf clean all
 # 写入 KDE/KWin 系统级默认值，用户配置可覆盖。
 # 默认使用 Fcitx5 虚拟键盘、启用神灯效果，并在鼠标闲置 15 秒后隐藏光标。
 RUN set -eux; \
@@ -201,40 +205,46 @@ RUN set -eux; \
     rm -f /tmp/JetBrainsMono.zip; \
     fc-cache -f "$font_dir"
 
-# 开发、终端与容器工具。每个软件单独一层，避免更新一个包时重建整组。
+# 开发与终端工具。
 # curl、unzip、rsync、wget 和 toolbox 已由 KDE 环境的 core、standard、
 # kde-desktop 组提供，这里不再重复安装。
-RUN dnf install -y git && dnf clean all
-RUN dnf install -y git-lfs && dnf clean all
-RUN dnf install -y gh && dnf clean all
-RUN dnf install -y neovim && dnf clean all
-RUN dnf install -y kitty && dnf clean all
-RUN dnf install -y fish && dnf clean all
-RUN dnf install -y podman && dnf clean all
-RUN dnf install -y podman-compose && dnf clean all
-RUN dnf install -y buildah && dnf clean all
-RUN dnf install -y skopeo && dnf clean all
-RUN dnf install -y distrobox && dnf clean all
-RUN dnf install -y ripgrep && dnf clean all
-RUN dnf install -y fd-find && dnf clean all
-RUN dnf install -y fzf && dnf clean all
-RUN dnf install -y bat && dnf clean all
-RUN dnf install -y eza && dnf clean all
-RUN dnf install -y fastfetch && dnf clean all
+# 按功能合并为单个 dnf 事务：原来 20+ 个 RUN 各自产生约 50 MiB 的重复写入，
+# 合并后只保留一层；代价是升级其中一个包会重建这一层。
 RUN dnf copr enable -y seaweed/starship \
-    && dnf install -y starship \
-    && dnf clean all
-RUN dnf install -y htop && dnf clean all
-RUN dnf install -y btop && dnf clean all
-RUN dnf install -y jq && dnf clean all
-RUN dnf install -y yq && dnf clean all
-RUN dnf install -y p7zip && dnf clean all
-RUN dnf copr enable -y boobaa/ouch \
-    && dnf install -y ouch \
+    && dnf copr enable -y boobaa/ouch \
+    && dnf install -y \
+        git \
+        git-lfs \
+        gh \
+        neovim \
+        kitty \
+        fish \
+        ripgrep \
+        fd-find \
+        fzf \
+        bat \
+        eza \
+        fastfetch \
+        htop \
+        btop \
+        jq \
+        yq \
+        p7zip \
+        starship \
+        ouch \
     && dnf clean all
 
-# 安装 Flatpak，并通过系统级 remotes.d 预配置 Flathub 源。
-RUN dnf install -y flatpak && dnf clean all
+# 容器与运行时工具：Podman 栈、Distrobox、Flatpak。
+RUN dnf install -y \
+        podman \
+        podman-compose \
+        buildah \
+        skopeo \
+        distrobox \
+        flatpak \
+    && dnf clean all
+
+# 通过系统级 remotes.d 预配置 Flathub 源。
 RUN set -eux; \
     install -d /usr/share/flatpak/remotes.d; \
     curl -fsSL --retry 3 --retry-all-errors \
@@ -243,14 +253,12 @@ RUN set -eux; \
     grep -q '^\[Flatpak Repo\]' /usr/share/flatpak/remotes.d/flathub.flatpakrepo; \
     grep -q '^GPGKey=' /usr/share/flatpak/remotes.d/flathub.flatpakrepo
 
-# 安装 Google Chrome 仓库配置；该仓库默认禁用，安装 Chrome 时临时启用。
-RUN dnf install -y fedora-workstation-repositories && dnf clean all
-
 # 导入第三方仓库 key，并写入 VS Code、Microsoft Edge 仓库配置。
-# Google Chrome 仓库由 fedora-workstation-repositories 提供。
+# Google Chrome 仓库由 fedora-workstation-repositories 提供，同样保持禁用。
 # 所有第三方仓库保持禁用，安装时临时启用。
 RUN set -eux; \
     install -d /etc/yum.repos.d; \
+    dnf install -y fedora-workstation-repositories; \
     rpm --import https://packages.microsoft.com/keys/microsoft.asc; \
     rpm --import https://dl.google.com/linux/linux_signing_key.pub; \
     printf '%s\n' \
@@ -268,12 +276,18 @@ RUN set -eux; \
         'enabled=0' \
         'gpgcheck=1' \
         'gpgkey=https://packages.microsoft.com/keys/microsoft.asc' \
-        > /etc/yum.repos.d/microsoft-edge.repo
+        > /etc/yum.repos.d/microsoft-edge.repo; \
+    dnf clean all
 
-# 安装 VS Code、Microsoft Edge 和 Google Chrome。
-RUN dnf install -y --enablerepo=code code && dnf clean all
-RUN dnf install -y --enablerepo=microsoft-edge microsoft-edge-stable && dnf clean all
-RUN dnf install -y --enablerepo=google-chrome google-chrome-stable && dnf clean all
+# 浏览器与编辑器：VS Code、Microsoft Edge、Google Chrome 合并为同一事务。
+RUN dnf install -y \
+        --enablerepo=code \
+        --enablerepo=microsoft-edge \
+        --enablerepo=google-chrome \
+        code \
+        microsoft-edge-stable \
+        google-chrome-stable \
+    && dnf clean all
 
 # 安装最新版 Clash Verge Rev，CI 传入经认证 API 解析的 RPM URL；
 # 未传入时本地构建回退到公开 GitHub API。
