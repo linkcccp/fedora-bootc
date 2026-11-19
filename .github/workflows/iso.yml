@@ -312,14 +312,19 @@ jobs:
                     fi
                   done
                   # 确认 ISO 内确实是 Anaconda 安装环境，并且内嵌了 payload 容器存储。
-                  sudo mkdir -p "$BIB_ROOT/verify"
-                  sudo osirrox -indev "$iso" -extract /LiveOS/squashfs.img "$BIB_ROOT/verify/squashfs.img"
-                  unsquashfs -l "$BIB_ROOT/verify/squashfs.img" > "$BIB_ROOT/verify/squashfs.txt"
-                  grep -qE 'usr/share/anaconda/interactive-defaults\.ks' "$BIB_ROOT/verify/squashfs.txt"
-                  grep -qE 'var/lib/containers/storage' "$BIB_ROOT/verify/squashfs.txt"
+                  # 目录由当前用户创建、只对需要特权的 xorriso 解包动作使用 sudo，
+                  # 避免出现 root 目录下非 root 无法写文件（此前 run 44463607659 的失败点）。
+                  verify_dir="$RUNNER_TEMP/verify"
+                  rm -rf "$verify_dir"
+                  mkdir -p "$verify_dir"
+                  sudo osirrox -indev "$iso" -extract /LiveOS/squashfs.img "$verify_dir/squashfs.img"
+                  sudo chown "$(id -u):$(id -g)" "$verify_dir/squashfs.img"
+                  unsquashfs -l "$verify_dir/squashfs.img" > "$verify_dir/squashfs.txt"
+                  grep -qE 'usr/share/anaconda/interactive-defaults\.ks' "$verify_dir/squashfs.txt"
+                  grep -qE 'var/lib/containers/storage' "$verify_dir/squashfs.txt"
                   grep -E 'usr/(libexec|share)/anaconda(/|$)|interactive-defaults\.ks' \
-                    "$BIB_ROOT/verify/squashfs.txt" | head -n 20
-                  sudo rm -rf "$BIB_ROOT/verify"
+                    "$verify_dir/squashfs.txt" | head -n 20
+                  rm -f "$verify_dir/squashfs.img"
 
             - name: Export package list
               run: |
