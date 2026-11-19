@@ -10,8 +10,11 @@
 # 该镜像只在 GitHub Actions 的 iso job 中构建（iso.yml → Build installer container），
 # 本地不参与构建；需要验证时使用 Actions 页面的 workflow_dispatch 手动运行。
 #
-# 这里统一用 `RUN cat <<'EOF'` 而不是 `COPY <<EOF`：前者只依赖容器内的 shell，
-# 后者的 heredoc 语法需要较新的 buildah 前端。
+# 写文件一律用 `printf '%s\n' ... > file`，不要用 heredoc（`RUN cat <<EOF` / `COPY <<EOF`）。
+# GitHub Actions 的 ubuntu-24.04 通过 apt 安装的 podman/buildah 由 Debian 打包，
+# 链接的 openshift/imagebuilder 版本没有 heredoc 解析能力：正文行会被当作 Dockerfile
+# 指令，构建报 `Unknown instruction: "LABEL:"` 并退出 125（run 44457604061 实测）。
+# printf 是容器内 /bin/sh 的内建命令，与宿主 buildah 版本无关。
 
 ARG BASE_IMAGE=quay.io/fedora/fedora-bootc:45
 FROM ${BASE_IMAGE}
@@ -53,22 +56,22 @@ RUN mkdir -p /boot/efi && cp -ra /usr/lib/efi/*/*/EFI /boot/efi
 
 # ISO 的 GRUB 菜单与内核参数。label 必须与 inst.stage2=hd:LABEL= 完全一致。
 RUN mkdir -p /usr/lib/image-builder/bootc
-RUN cat <<'EOF' > /usr/lib/image-builder/bootc/iso.yaml
-label: "Fedora-bootc-kde"
-grub2:
-  entries:
-    - name: "Install Fedora bootc KDE"
-      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Fedora-bootc-kde console=tty0 inst.graphical selinux=0 rhgb quiet"
-      initrd: "/images/pxeboot/initrd.img"
-EOF
+RUN printf '%s\n' \
+        'label: "Fedora-bootc-kde"' \
+        'grub2:' \
+        '  entries:' \
+        '    - name: "Install Fedora bootc KDE"' \
+        '      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Fedora-bootc-kde console=tty0 inst.graphical selinux=0 rhgb quiet"' \
+        '      initrd: "/images/pxeboot/initrd.img"' \
+    > /usr/lib/image-builder/bootc/iso.yaml
 
 # 让 Anaconda 进入 bootc 安装模式。
 # source 指向 ISO 内嵌的 payload（containers-storage，离线安装）；
 # target 决定安装后系统跟踪的 ref（带 transport 前缀会被拒绝）。
 RUN test -n "${PAYLOAD_IMGREF}" && test -n "${TARGET_IMGREF}"
-RUN cat <<EOF > /usr/share/anaconda/interactive-defaults.ks
-bootc --source-imgref containers-storage:${PAYLOAD_IMGREF} --target-imgref ${TARGET_IMGREF}
-EOF
+RUN printf '%s\n' \
+        "bootc --source-imgref containers-storage:${PAYLOAD_IMGREF} --target-imgref ${TARGET_IMGREF}" \
+    > /usr/share/anaconda/interactive-defaults.ks
 
 # 复刻 lorax 对 Anaconda 运行环境的最小调整。
 RUN set -eux; \
@@ -80,21 +83,24 @@ RUN set -eux; \
 # 同时保证安装器仓库不会泄漏进安装后的 bootc 系统。
 RUN set -eux; \
     mv /usr/share/anaconda/list-harddrives-stub /usr/bin/list-harddrives; \
+    rm -rf /etc/anaconda.repos.d; \
+    test -d /usr/share/dnf5/repos.d; \
     mv /usr/share/dnf5/repos.d /etc/anaconda.repos.d; \
     ln -s /lib/systemd/system/anaconda.target /etc/systemd/system/default.target; \
     rm -v /usr/lib/systemd/system-generators/systemd-gpt-auto-generator; \
     ln -s /usr/lib/systemd/system/anaconda-shell@.service /usr/lib/systemd/system/autovt@.service
 
 RUN mkdir -p /usr/lib/systemd/logind.conf.d
-RUN cat <<'EOF' > /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
-[Login]
-ReserveVT=2
-EOF
+RUN printf '%s\n' \
+        '[Login]' \
+        'ReserveVT=2' \
+    > /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
 
 # 重建 initramfs 并加入 anaconda 模块。
+# 直接从 /usr/lib/modules 找带 vmlinuz 的目录，避免依赖 kernel-install --json 的输出格式。
 RUN set -eux; \
     mkdir -p "$(realpath /root)"; \
-    kernel=$(kernel-install list --json pretty | jq -r '.[] | select(.has_kernel == true) | .version'); \
+    kernel=$(for d in /usr/lib/modules/*; do if [ -f "$d/vmlinuz" ]; then printf '%s\n' "${d##*/}"; break; fi; done); \
     test -n "$kernel"; \
     DRACUT_NO_XATTR=1 dracut --force -v --zstd --reproducible --no-hostonly \
         --add "anaconda" \
@@ -102,14 +108,14 @@ RUN set -eux; \
 
 # Anaconda 以 root 运行，允许 root 会话下的 pipewire。
 RUN mkdir -p /etc/systemd/user/pipewire.service.d /etc/systemd/user/pipewire.socket.d
-RUN cat <<'EOF' > /etc/systemd/user/pipewire.service.d/allowroot.conf
-[Unit]
-ConditionUser=
-EOF
-RUN cat <<'EOF' > /etc/systemd/user/pipewire.socket.d/allowroot.conf
-[Unit]
-ConditionUser=
-EOF
+RUN printf '%s\n' \
+        '[Unit]' \
+        'ConditionUser=' \
+    > /etc/systemd/user/pipewire.service.d/allowroot.conf
+RUN printf '%s\n' \
+        '[Unit]' \
+        'ConditionUser=' \
+    > /etc/systemd/user/pipewire.socket.d/allowroot.conf
 
 # 构建期自检：generic-iso 的容器契约缺任何一项都直接失败，而不是等到出 ISO 阶段。
 RUN set -eux; \
