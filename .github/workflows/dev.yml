@@ -184,6 +184,14 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.meta.outputs.tag }}
         run: |
+          # GitHub Release 正文上限 125000 字符，超长会直接 422 判失败。
+          # 完整列表仍作为 changes.md 附件上传，正文用截断版。
+          notes="$RUNNER_TEMP/out/release-notes.md"
+          head -c 120000 "$RUNNER_TEMP/out/changes.md" > "$notes"
+          if [ "$(wc -c < "$RUNNER_TEMP/out/changes.md")" -gt 120000 ]; then
+            printf '\n\n> 变更列表过长，正文已截断；完整内容见附件 `changes.md` / `packages.tsv`。\n' >> "$notes"
+          fi
+
           assets=(
             "$RUNNER_TEMP/out/packages.tsv"
             "$RUNNER_TEMP/out/packages.json"
@@ -196,7 +204,7 @@ jobs:
 
           if gh release view "$IMAGE_TAG" >/dev/null 2>&1; then
             gh release upload "$IMAGE_TAG" "${assets[@]}" --clobber
-            gh release edit "$IMAGE_TAG" --latest --notes-file "$RUNNER_TEMP/out/changes.md"
+            gh release edit "$IMAGE_TAG" --latest --notes-file "$notes"
             exit 0
           fi
 
@@ -204,14 +212,14 @@ jobs:
             gh release create "$IMAGE_TAG" \
               --target "$GITHUB_SHA" \
               --title "Fedora bootc ${IMAGE_TAG}" \
-              --notes-file "$RUNNER_TEMP/out/changes.md" \
+              --notes-file "$notes" \
               --latest \
               "${assets[@]}"
           else
             gh release create "$IMAGE_TAG" \
               --verify-tag \
               --title "Fedora bootc ${IMAGE_TAG}" \
-              --notes-file "$RUNNER_TEMP/out/changes.md" \
+              --notes-file "$notes" \
               --latest \
               "${assets[@]}"
           fi
@@ -227,4 +235,5 @@ jobs:
             echo "- Latest: \`$IMAGE_NAME:latest\`"
             echo "- Release: \`$IMAGE_TAG\`"
           } >> "$GITHUB_STEP_SUMMARY"
-          cat "$RUNNER_TEMP/out/changes.md" >> "$GITHUB_STEP_SUMMARY"
+          # 步骤摘要也有长度限制，长变更列表只放前 100k
+          head -c 100000 "$RUNNER_TEMP/out/changes.md" >> "$GITHUB_STEP_SUMMARY"

@@ -431,10 +431,21 @@ jobs:
             - name: Create or update release
               run: |
                   asset_dir="$BIB_ROOT/assets"
+                  # GitHub Release 正文上限 125000 字符，超长会 422 判失败；
+                  # 完整列表仍作为 changes.md 附件上传，正文用截断版。
+                  notes_file=""
+                  if [ -s "$asset_dir/changes.md" ]; then
+                    notes_file="$RUNNER_TEMP/release-notes.md"
+                    head -c 120000 "$asset_dir/changes.md" > "$notes_file"
+                    if [ "$(wc -c < "$asset_dir/changes.md")" -gt 120000 ]; then
+                      printf '\n\n> 变更列表过长，正文已截断；完整内容见附件 `changes.md` / `packages.tsv`。\n' >> "$notes_file"
+                    fi
+                  fi
+
                   if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
                     gh release upload "$RELEASE_TAG" "$asset_dir"/* --clobber
-                    if [ -s "$asset_dir/changes.md" ]; then
-                      gh release edit "$RELEASE_TAG" --latest --notes-file "$asset_dir/changes.md"
+                    if [ -n "$notes_file" ]; then
+                      gh release edit "$RELEASE_TAG" --latest --notes-file "$notes_file"
                     else
                       gh release edit "$RELEASE_TAG" --latest
                     fi
@@ -442,8 +453,8 @@ jobs:
                   fi
 
                   notes_arg=(--notes "Fedora bootc ${VERSION}")
-                  if [ -s "$asset_dir/changes.md" ]; then
-                    notes_arg=(--notes-file "$asset_dir/changes.md")
+                  if [ -n "$notes_file" ]; then
+                    notes_arg=(--notes-file "$notes_file")
                   fi
 
                   if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
@@ -526,5 +537,5 @@ jobs:
                     echo "- Download: \`download-iso.sh --version ${VERSION}\` / \`download-iso.cmd\`"
                   } >> "$GITHUB_STEP_SUMMARY"
                   if [ -s "$BIB_ROOT/assets/changes.md" ]; then
-                    cat "$BIB_ROOT/assets/changes.md" >> "$GITHUB_STEP_SUMMARY"
+                    head -c 100000 "$BIB_ROOT/assets/changes.md" >> "$GITHUB_STEP_SUMMARY"
                   fi
