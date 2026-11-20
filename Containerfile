@@ -81,6 +81,12 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 # Clash Verge Rev：Tauri GUI + clash-verge-service（TUN 模式的特权 helper）。
 # 上游只有 GitHub Release 的 rpm；CI 传入 URL，本地构建回退到 GitHub API。
+#
+# 注意：2.5.x 起 rpm **不再自带 systemd 单元**，只带 clash-verge-service-install。
+# 该安装器会把服务二进制复制到 /var/lib/clash-verge-service/ 并把单元写进
+# /etc/systemd/system/，两者在构建阶段（/var 是 tmpfs）都必须避免，
+# 所以这里只做安装、不 enable：首次在 GUI 里开 TUN 时它会提示安装服务，
+# 点一次即可，装出来的东西落在可写层，bootc 升级不会丢。
 ARG CLASH_VERGE_RPM_URL
 RUN set -eux; \
     url="${CLASH_VERGE_RPM_URL:-}"; \
@@ -92,7 +98,9 @@ RUN set -eux; \
     fi; \
     dnf install -y "$url"; \
     dnf clean all; \
-    systemctl enable clash-verge-service.service
+    test -x /usr/bin/clash-verge-service; \
+    test -x /usr/bin/clash-verge-service-install; \
+    ls /usr/share/applications | grep -qi clash
 
 # v2rayA：Web UI + 系统服务，支持 vmess/vless/trojan/ss，订阅可直接导入。
 # 上游 rpm 依赖 Fedora 仓库里没有的 v2ray/xray 包，所以直接装静态二进制；
@@ -231,8 +239,8 @@ RUN set -eux; \
     test -x /usr/bin/xray; \
     test -f /usr/share/xray/geoip.dat; \
     test -L /etc/systemd/system/multi-user.target.wants/v2raya.service; \
-    test -L /etc/systemd/system/multi-user.target.wants/clash-verge-service.service; \
     test -L /etc/systemd/system/multi-user.target.wants/nvidia-clock-ac.service; \
+    test -x /usr/bin/clash-verge-service-install; \
     test -f /usr/share/fonts/maple-mono/MapleMonoNormal-NF-CN-Regular.ttf; \
     test -n "$(find /usr/share/fonts/nerd-fonts/JetBrainsMono -name '*.ttf' -print -quit)"; \
     test -f /usr/share/color-schemes/FluentLight.colors; \

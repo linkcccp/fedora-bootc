@@ -33,7 +33,9 @@ FROM ${BASE_IMAGE}
 
 ### 2. 代理
 
-- **Clash Verge Rev**：Tauri GUI + `clash-verge-service`（TUN 模式的特权 helper，已 enable）
+- **Clash Verge Rev**：Tauri GUI；TUN 用的 `clash-verge-service` 不随镜像启用——
+  上游 2.5.x 起由 `clash-verge-service-install` 在首次开 TUN 时装进
+  `/etc/systemd/system` 与 `/var/lib/clash-verge-service`（可写层，升级不丢）
 - **v2rayA**：静态二进制 + Xray 内核 + geo 数据，`v2raya.service` 已 enable，
   Web UI 在 `http://127.0.0.1:2017`，支持 `vmess://` / `vless://` / base64 订阅
 
@@ -78,13 +80,15 @@ sudo bootc rollback
 这三项属于用户状态，镜像不预置：
 
 1. **输入法**：系统设置 → 输入法 → 添加「拼音（Fcitx 5）」
-2. **Clash**：打开 Clash Verge Rev → 导入订阅 → 按需开启 TUN
+2. **Clash**：打开 Clash Verge Rev → 导入订阅 → 开启 TUN 时按提示点一次「安装服务」
+   （`clash-verge-service` 由 GUI 装进 `/etc/systemd/system` 与 `/var/lib`，只需一次）
 3. **v2rayA**：浏览器打开 `http://127.0.0.1:2017` → 创建管理员账号 → 导入订阅
 
 自检命令：
 
 ```sh
-systemctl status v2raya clash-verge-service nvidia-clock-ac
+systemctl status v2raya nvidia-clock-ac
+systemctl status clash-verge-service   # 首次开过 TUN 之后才会有
 rpm -q fcitx5 fcitx5-chinese-addons langpacks-zh_CN
 fc-match "Maple Mono Normal NF CN"
 ls /usr/share/plasma/desktoptheme/Fluent-light
