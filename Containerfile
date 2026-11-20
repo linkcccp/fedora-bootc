@@ -110,14 +110,19 @@ RUN set -eux; \
 # v2rayA：Web UI + 系统服务，支持 vmess/vless/trojan/ss，订阅可直接导入。
 # 上游 rpm 依赖 Fedora 仓库里没有的 v2ray/xray 包，所以直接装静态二进制；
 # 前端已 go:embed 进二进制，不需要额外 web 资源。
+# CI 传入经认证 API 解析出的下载地址；本地构建回退到公开 API（可能撞限流）。
+ARG V2RAYA_URL
 RUN set -eux; \
     dnf install -y nftables iproute unzip; \
-    tag="$(curl -fsSL --retry 3 --retry-all-errors \
-        -H 'Accept: application/vnd.github+json' \
-        https://api.github.com/repos/v2rayA/v2rayA/releases/latest | jq -er .tag_name)"; \
-    ver="${tag#v}"; \
-    curl -fsSL --retry 3 --retry-all-errors -o /tmp/v2raya \
-        "https://github.com/v2rayA/v2rayA/releases/download/${tag}/v2raya_linux_x64_${ver}"; \
+    url="${V2RAYA_URL:-}"; \
+    if [ -z "$url" ]; then \
+        tag="$(curl -fsSL --retry 3 --retry-all-errors \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/v2rayA/v2rayA/releases/latest | jq -er .tag_name)"; \
+        ver="${tag#v}"; \
+        url="https://github.com/v2rayA/v2rayA/releases/download/${tag}/v2raya_linux_x64_${ver}"; \
+    fi; \
+    curl -fsSL --retry 3 --retry-all-errors -o /tmp/v2raya "$url"; \
     install -D -m 0755 /tmp/v2raya /usr/bin/v2raya; \
     rm -f /tmp/v2raya; \
     curl -fsSL --retry 3 --retry-all-errors -o /tmp/xray.zip \
