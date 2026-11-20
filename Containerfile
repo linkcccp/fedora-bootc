@@ -97,7 +97,10 @@ RUN set -eux; \
 
 # 简体中文语言包、图标缓存工具与 Fcitx5 输入法。
 # CJK 字体由 KDE 环境的 @fonts 组提供。
-# 这些包按功能合并进同一个 dnf 事务，减少层数与重复写入。
+# fcitx5-autostart 提供 /etc/profile.d/fcitx5.sh（GTK_IM_MODULE /
+# QT_IM_MODULE / XMODIFIERS），必须保留；但其 XDG 自启动会与
+# kwinrc 的 [Wayland] InputMethod 重复启动 fcitx5，后启动的实例
+# 抢不到 D-Bus 名字会卸载全部 addon，因此用 Hidden=true 关闭自启动。
 RUN dnf install -y \
         langpacks-zh_CN \
         gtk-update-icon-cache \
@@ -107,10 +110,19 @@ RUN dnf install -y \
         fcitx5-configtool \
         fcitx5-gtk \
         fcitx5-qt \
+    && printf '%s\n' \
+        '[Desktop Entry]' \
+        'Type=Application' \
+        'Name=Fcitx 5' \
+        'Hidden=true' \
+        > /etc/xdg/autostart/org.fcitx.Fcitx5.desktop \
     && dnf clean all
 
 # 写入 KDE/KWin 系统级默认值，用户配置可覆盖。
-# 默认使用 Fcitx5 虚拟键盘、启用神灯效果，并在鼠标闲置 15 秒后隐藏光标。
+# 启用神灯效果，并在鼠标闲置 15 秒后隐藏光标。
+# 通过 kwinrc 的 [Wayland] InputMethod 启动 Fcitx5：这是 KDE 6 启用
+# text-input-v3 的条件，Plasma 与 KRunner 等原生 Wayland 应用依靠它
+# 才能输入中文。登录自启动已在上面用 Hidden=true 关闭。
 RUN set -eux; \
     kwriteconfig6 --file /etc/xdg/kdeglobals --group General --key ColorScheme FluentLight; \
     kwriteconfig6 --file /etc/xdg/kdeglobals --group General --key font \
@@ -130,6 +142,30 @@ RUN set -eux; \
     kwriteconfig6 --file /etc/xdg/kwinrc --group Plugins --key magiclampEnabled true; \
     kwriteconfig6 --file /etc/xdg/kwinrc --group Plugins --key hidecursorEnabled true; \
     kwriteconfig6 --file /etc/xdg/kwinrc --group Effect-hidecursor --key InactivityDuration 15
+
+# 固定 XDG 用户目录为英文名。
+# 默认的 xdg-user-dirs-update 会按 locale 把 $HOME 下的目录翻译成
+# 「下载 / 文档 / 桌面」等中文名。这里禁用自动更新，并在 /etc/skel
+# 预置英文的 user-dirs.dirs 与目录，新建用户直接得到英文名。
+RUN set -eux; \
+    printf 'enabled=False\n' > /etc/xdg/user-dirs.conf; \
+    install -d -m 0755 /etc/skel/.config; \
+    printf '%s\n' \
+        'XDG_DESKTOP_DIR="$HOME/Desktop"' \
+        'XDG_DOWNLOAD_DIR="$HOME/Downloads"' \
+        'XDG_TEMPLATES_DIR="$HOME/Templates"' \
+        'XDG_PUBLICSHARE_DIR="$HOME/Public"' \
+        'XDG_DOCUMENTS_DIR="$HOME/Documents"' \
+        'XDG_MUSIC_DIR="$HOME/Music"' \
+        'XDG_PICTURES_DIR="$HOME/Pictures"' \
+        'XDG_VIDEOS_DIR="$HOME/Videos"' \
+        'XDG_PROJECTS_DIR="$HOME/Projects"' \
+        > /etc/skel/.config/user-dirs.dirs; \
+    install -d -m 0755 \
+        /etc/skel/Desktop /etc/skel/Downloads /etc/skel/Templates \
+        /etc/skel/Public /etc/skel/Documents /etc/skel/Music \
+        /etc/skel/Pictures /etc/skel/Videos /etc/skel/Projects; \
+    test -f /etc/skel/.config/user-dirs.dirs
 
 # 复制 builder 阶段编译出的 kmod，并在最终镜像安装匹配的用户态驱动。
 # 排除 kmod-nvidia 元包和 akmod-nvidia，避免把编译工具链带入最终镜像。
@@ -234,6 +270,19 @@ RUN dnf copr enable -y seaweed/starship \
         ouch \
     && dnf clean all
 
+# 安装 fnm（Fast Node Manager）。
+# 官方发布包是单文件二进制；同时生成 fish 补全，宿主机与容器共用同一版本。
+RUN set -eux; \
+    curl -fsSL -o /tmp/fnm.zip \
+        https://github.com/Schniz/fnm/releases/latest/download/fnm-linux.zip; \
+    unzip -j /tmp/fnm.zip fnm -d /usr/bin; \
+    chmod 0755 /usr/bin/fnm; \
+    install -d /usr/share/fish/vendor_completions.d; \
+    fnm completions --shell fish > /usr/share/fish/vendor_completions.d/fnm.fish; \
+    test -s /usr/share/fish/vendor_completions.d/fnm.fish; \
+    fnm --version; \
+    rm -f /tmp/fnm.zip
+
 # 容器与运行时工具：Podman 栈、Distrobox、Flatpak。
 RUN dnf install -y \
         podman \
@@ -252,6 +301,34 @@ RUN set -eux; \
         https://flathub.org/repo/flathub.flatpakrepo; \
     grep -q '^\[Flatpak Repo\]' /usr/share/flatpak/remotes.d/flathub.flatpakrepo; \
     grep -q '^GPGKey=' /usr/share/flatpak/remotes.d/flathub.flatpakrepo
+
+# 移除 Plasma Discover。
+# bootc 上 packagekit.service 带有 ConditionPathExists=!/run/ostree-booted，
+# 永远不会启动；Discover 的 PackageKit 后端因此持续报错，并在无网络时
+# 触发 KCrash 递归崩溃。Discover 依赖的服务在 bootc 上不可用，直接删除，
+# 由下一段的 Bazaar 承担 Flatpak 商店角色。
+RUN set -eux; \
+    dnf remove -y \
+        plasma-discover \
+        plasma-discover-flatpak \
+        plasma-discover-kns \
+        plasma-discover-libs \
+        plasma-discover-notifier \
+        plasma-discover-offline-updates \
+        plasma-discover-packagekit; \
+    dnf clean all; \
+    ! rpm -q plasma-discover >/dev/null 2>&1; \
+    test -z "$(find /usr/share/applications -name '*discover*' -print -quit)"
+
+# 预装 Bazaar：独立的 GTK4 Flatpak 商店，不依赖 PackageKit。
+# 系统级安装进 /var/lib/flatpak，随镜像分发，首次登录无需联网安装。
+RUN set -eux; \
+    flatpak remote-add --system --if-not-exists flathub \
+        /usr/share/flatpak/remotes.d/flathub.flatpakrepo; \
+    flatpak install --system --noninteractive -y flathub io.github.kolunmi.Bazaar; \
+    flatpak list --system --app --columns=application | grep -qx io.github.kolunmi.Bazaar; \
+    test -f /var/lib/flatpak/exports/share/applications/io.github.kolunmi.Bazaar.desktop; \
+    rm -rf /var/cache/flatpak
 
 # 导入第三方仓库 key，并写入 VS Code、Microsoft Edge 仓库配置。
 # Google Chrome 仓库由 fedora-workstation-repositories 提供，同样保持禁用。
