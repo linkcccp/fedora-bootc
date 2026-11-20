@@ -122,4 +122,4 @@ iso/Containerfile             # ISO 安装器容器
 - **不再内置**：VS Code / Edge / Chrome、gh / neovim / kitty 等开发工具、tuna 镜像覆盖。
   aurora 自带 Homebrew，CLI 工具用 `brew install` 即可；GUI 应用用 Flatpak
   （`flatpak install flathub com.visualstudio.code` 等）。
-- **更新方式**：`uupd` 会按当前 ref 自动 `bootc upgrade`，不需要本仓库的定时构建。
+- **更新方式**：`uupd` 会按当前 ref 自动 `bootc upgrade`
