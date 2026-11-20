@@ -1,6 +1,0 @@
-# 不要删除这个文件：删除后 Bazaar 会在下次启动时从所有已部署系统上被卸载。
-# 与 Universal Blue 的 bluefin/aurora 使用同一份声明。
-# 已安装的同名 ref 会被 flatpak 跳过，不会升级或降级。
-[Flatpak Preinstall io.github.kolunmi.Bazaar]
-Branch=stable
-IsRuntime=false
