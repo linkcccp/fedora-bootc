@@ -127,3 +127,6 @@ iso/Containerfile             # ISO 安装器容器
   aurora 自带 Homebrew，CLI 工具用 `brew install` 即可；GUI 应用用 Flatpak
   （`flatpak install flathub com.visualstudio.code` 等）。
 - **更新方式**：`uupd` 会按当前 ref 自动 `bootc upgrade`
+- **层分块**：构建完会用 [chunkah](https://github.com/coreos/chunkah) 重新切层
+  （与 aurora 上游同工具同参数），定制层从整块变成 ~2–5 MiB 的小块，
+  `bootc upgrade` 只需下载变化的部分。

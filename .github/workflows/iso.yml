@@ -100,25 +100,39 @@ jobs:
                   test -n "$url"
                   echo "url=$url" >> "$GITHUB_OUTPUT"
 
-            - name: Resolve v2rayN RPM
-              id: v2rayn
-              env:
-                  GH_TOKEN: ${{ github.token }}
-              run: |
-                  url=$(gh api repos/2dust/v2rayN/releases/latest \
-                    --jq '[.assets[] | select(.name == "v2rayN-linux-rhel-64.rpm")][0].browser_download_url // empty')
-                  test -n "$url"
-                  echo "url=$url" >> "$GITHUB_OUTPUT"
-
             - name: Build image
               env:
                   CLASH_VERGE_RPM_URL: ${{ steps.clash.outputs.url }}
-                  V2RAYN_RPM_URL: ${{ steps.v2rayn.outputs.url }}
               run: |
                   podman build --pull=always \
                     --build-arg "CLASH_VERGE_RPM_URL=$CLASH_VERGE_RPM_URL" \
-                    --build-arg "V2RAYN_RPM_URL=$V2RAYN_RPM_URL" \
                     --file Containerfile --tag "$IMAGE_NAME:$IMAGE_TAG" .
+
+            - name: Rechunk with chunkah
+              run: |
+                  # 把定制层切成 ~2-5 MiB 的小块，bootc upgrade 只需下载变化的部分。
+                  set -euo pipefail
+                  out="$(mktemp -d)"
+                  cfg="$(mktemp)"
+                  trap 'rm -rf "$out" "$cfg"' EXIT
+
+                  podman inspect "$IMAGE_NAME:$IMAGE_TAG" > "$cfg"
+                  podman run --rm \
+                    --mount=type=image,src="$IMAGE_NAME:$IMAGE_TAG",target=/chunkah \
+                    -v "$cfg:/chunkah-config.json:ro,Z" \
+                    -v "$out:/run/out:Z" \
+                    quay.io/coreos/chunkah:latest \
+                    build \
+                      --verbose \
+                      --compressed \
+                      --max-layers 256 \
+                      --prune /sysroot/ \
+                      --label ostree.commit- --label ostree.final-diffid- \
+                      --config /chunkah-config.json \
+                      --output oci:/run/out/chunked
+
+                  chunked="$(podman pull "oci:$out/chunked")"
+                  podman tag "$chunked" "$IMAGE_NAME:$IMAGE_TAG"
 
             - name: Push image
               env:
