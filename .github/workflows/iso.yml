@@ -100,12 +100,24 @@ jobs:
                   test -n "$url"
                   echo "url=$url" >> "$GITHUB_OUTPUT"
 
+            - name: Resolve v2rayA release
+              id: v2raya
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  tag=$(gh api repos/v2rayA/v2rayA/releases/latest --jq .tag_name)
+                  ver=${tag#v}
+                  test -n "$tag"
+                  echo "url=https://github.com/v2rayA/v2rayA/releases/download/$tag/v2raya_linux_x64_$ver" >> "$GITHUB_OUTPUT"
+
             - name: Build image
               env:
                   CLASH_VERGE_RPM_URL: ${{ steps.clash.outputs.url }}
+                  V2RAYA_URL: ${{ steps.v2raya.outputs.url }}
               run: |
                   podman build --pull=always \
                     --build-arg "CLASH_VERGE_RPM_URL=$CLASH_VERGE_RPM_URL" \
+                    --build-arg "V2RAYA_URL=$V2RAYA_URL" \
                     --file Containerfile --tag "$IMAGE_NAME:$IMAGE_TAG" .
 
             - name: Rechunk with chunkah
