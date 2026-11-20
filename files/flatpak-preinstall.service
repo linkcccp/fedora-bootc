@@ -1,0 +1,17 @@
+[Unit]
+Description=Install Flatpaks declared in /usr/share/flatpak/preinstall.d
+Documentation=man:flatpak-preinstall(1)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak preinstall -y
+# 成功后保持 active，定时器/重复启动不会再次触发；
+# 失败（例如首次启动时没有网络）则每 30 秒重试，直到成功。
+RemainAfterExit=true
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

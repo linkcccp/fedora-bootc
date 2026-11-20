@@ -156,7 +156,7 @@ sudo dnf config-manager setopt \
 这些软件通过重建镜像并切换或升级 bootc 镜像更新，不在系统内用 `dnf upgrade`
 更新。
 
-## Flatpak 与 Flathub
+## Flatpak、Flathub 与 Bazaar
 
 镜像安装 Flatpak，并通过 `/usr/share/flatpak/remotes.d/flathub.flatpakrepo`
 预配置系统级 Flathub 源。该配置随镜像更新，不需要首次启动后手动执行
@@ -165,6 +165,29 @@ sudo dnf config-manager setopt \
 ```sh
 flatpak remotes --system
 flatpak install flathub org.mozilla.firefox
+```
+
+Bazaar（`io.github.kolunmi.Bazaar`）以 Flatpak 形式预装，用来替代已移除的
+Plasma Discover。预装分两层：
+
+- 构建时把 Bazaar 与 `org.gnome.Platform` 运行时装进 `/var/lib/flatpak`，
+  全新安装开箱可用，首次登录不需要联网；
+- `/usr/share/flatpak/preinstall.d/bazaar.preinstall` 声明镜像期望预装的应用，
+  由 `flatpak-preinstall.service` 在启动时执行 `flatpak preinstall -y` 同步。
+  这与 Universal Blue 的 bluefin/aurora 采用同一机制。
+
+需要第二层的原因是 bootc 的 `/var` 等价于 Docker 的 `VOLUME /var`：内容只在
+初始安装时解包，升级或 `bootc switch` 不会把镜像里 `/var/lib/flatpak` 的东西带到
+已有系统。`/usr` 中的声明随镜像原子更新，所以从旧镜像切换过来的机器会在下次
+启动时自动补齐 Bazaar，这一步需要联网。
+
+该同步不会改动已有安装：`flatpak preinstall` 遇到同名 ref 已安装时直接跳过，
+不升级也不降级；用户手动卸载后也不会被重新装回。反过来说，删除
+`bazaar.preinstall` 会让 Bazaar 在下次启动时从所有系统上被卸载。
+不重启也想立刻补齐时，可以手动触发一次：
+
+```sh
+sudo systemctl start flatpak-preinstall.service
 ```
 
 系统级 Flatpak 应用和运行时位于 `/var/lib/flatpak`，属于持久化系统状态，
