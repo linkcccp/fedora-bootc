@@ -321,7 +321,13 @@ RUN set -eux; \
     test -z "$(find /usr/share/applications -name '*discover*' -print -quit)"
 
 # 预装 Bazaar：独立的 GTK4 Flatpak 商店，不依赖 PackageKit。
-# 系统级安装进 /var/lib/flatpak，随镜像分发，首次登录无需联网安装。
+# 分两层：
+#   1. 构建时装进 /var/lib/flatpak，全新安装开箱可用，无需联网；
+#   2. 在 /usr/share/flatpak/preinstall.d 声明预期预装的应用，由启动时的
+#      flatpak preinstall 同步，覆盖从旧镜像 bootc switch 而来的机器。
+# 需要第 2 层是因为 bootc 的 /var 等价于 Docker 的 VOLUME /var：只在初始安装
+# 时解包，升级或 switch 不会把镜像 /var/lib/flatpak 的内容带到已有系统；
+# /usr 里的声明则随镜像原子更新。做法与 Universal Blue 的 bluefin/aurora 一致。
 RUN set -eux; \
     flatpak remote-add --system --if-not-exists flathub \
         /usr/share/flatpak/remotes.d/flathub.flatpakrepo; \
@@ -329,6 +335,22 @@ RUN set -eux; \
     flatpak list --system --app --columns=application | grep -qx io.github.kolunmi.Bazaar; \
     test -f /var/lib/flatpak/exports/share/applications/io.github.kolunmi.Bazaar.desktop; \
     rm -rf /var/cache/flatpak
+
+COPY files/bazaar.preinstall /usr/share/flatpak/preinstall.d/bazaar.preinstall
+COPY files/flatpak-preinstall.service /usr/lib/systemd/system/flatpak-preinstall.service
+
+# flatpak preinstall 只同步 /usr/share/flatpak/preinstall.d 的声明：
+# 已安装的同名 ref 直接跳过（不升级、不降级），用户手动卸载后也不再装回；
+# 声明被移除时则在下次同步时卸载。RemainAfterExit=true 让服务成功后保持
+# active，Restart=on-failure 让首次启动无网的情况每 30 秒重试直到成功。
+RUN set -eux; \
+    systemctl enable flatpak-preinstall.service; \
+    test -f /usr/share/flatpak/preinstall.d/bazaar.preinstall; \
+    grep -qx '\[Flatpak Preinstall io.github.kolunmi.Bazaar\]' \
+        /usr/share/flatpak/preinstall.d/bazaar.preinstall; \
+    grep -qx 'ExecStart=/usr/bin/flatpak preinstall -y' \
+        /usr/lib/systemd/system/flatpak-preinstall.service; \
+    test -L /etc/systemd/system/multi-user.target.wants/flatpak-preinstall.service
 
 # 导入第三方仓库 key，并写入 VS Code、Microsoft Edge 仓库配置。
 # Google Chrome 仓库由 fedora-workstation-repositories 提供，同样保持禁用。
