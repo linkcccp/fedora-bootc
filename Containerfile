@@ -38,7 +38,12 @@ RUN set -eux; \
         fcitx5-configtool \
         fcitx5-gtk \
         fcitx5-qt; \
-    dnf clean all
+    if ! dnf -y install glibc-langpack-zh; then \
+        echo "glibc-langpack-zh 不存在，回退到 glibc-all-langpacks"; \
+        dnf -y install glibc-all-langpacks; \
+    fi; \
+    dnf clean all; \
+    locale -a | grep -qx 'zh_CN.utf8'
 
 # fcitx5-autostart 提供 /etc/profile.d/fcitx5.sh（GTK_IM_MODULE / QT_IM_MODULE /
 # XMODIFIERS），要保留；但它的 XDG 自启动会和 kwinrc 的 [Wayland] InputMethod
@@ -231,7 +236,7 @@ RUN set -eux; \
 # 自检
 # ---------------------------------------------------------------------------
 RUN set -eux; \
-    rpm -q fcitx5 fcitx5-chinese-addons fcitx5-qt fcitx5-gtk langpacks-zh_CN glibc-langpack-zh; \
+    rpm -q fcitx5 fcitx5-chinese-addons fcitx5-qt fcitx5-gtk langpacks-zh_CN; \
     locale -a | grep -qx 'zh_CN.utf8'; \
     test -f /usr/share/applications/org.fcitx.Fcitx5.desktop; \
     grep -qx 'InputMethod=/usr/share/applications/org.fcitx.Fcitx5.desktop' /etc/xdg/kwinrc; \
