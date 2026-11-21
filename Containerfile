@@ -6,7 +6,7 @@
 #
 # 这里只加这几样东西：
 #   1. 中文：langpacks-zh_CN + fcitx5 全套 + KDE Wayland 输入法默认值
-#   2. 代理：Clash Verge Rev（GUI/TUN）+ v2rayA（Web UI + Xray 内核）
+#   2. 代理：Clash Verge Rev（GUI/TUN）+ v2rayA（Web UI + 内置 v2raya_core）
 #   3. 服务：NVIDIA 插电锁频（udev 触发的 oneshot，已 enable）
 #   4. 外观：Maple Mono / JetBrains Nerd Font + Fluent Light 主题与 Fluent11 图标
 #
@@ -108,52 +108,47 @@ RUN set -eux; \
     ls /usr/share/applications | grep -qi clash
 
 # v2rayA：Web UI + 系统服务，支持 vmess/vless/trojan/ss，订阅可直接导入。
-# 上游 rpm 依赖 Fedora 仓库里没有的 v2ray/xray 包，所以直接装静态二进制；
-# 前端已 go:embed 进二进制，不需要额外 web 资源。
-# CI 传入经认证 API 解析出的下载地址；本地构建回退到公开 API（可能撞限流）。
-ARG V2RAYA_URL
+# 2.5.x 起核心私有化为 v2raya_core（xray fork），版本必须与主程序完全一致，
+# 否则启动即报 CORE_VERSION_MISMATCH。官方 redhat rpm 里主程序、配套核心、
+# systemd 单元和 /usr/share/v2raya/{geoip,geosite}.dat 齐全，且依赖只有
+# rpmlib(...)，不需要 Fedora 仓库里没有的 v2ray/xray 包，所以直接装它。
+# CI 传入经认证 API 解析出的 rpm 地址；本地构建回退到公开 API（可能撞限流）。
+ARG V2RAYA_RPM_URL
 RUN set -eux; \
-    dnf install -y nftables iproute unzip; \
-    url="${V2RAYA_URL:-}"; \
+    dnf install -y nftables iproute; \
+    arch="${TARGETARCH:-}"; \
+    if [ -z "$arch" ]; then \
+        case "$(uname -m)" in \
+            x86_64) arch=amd64 ;; \
+            aarch64) arch=arm64 ;; \
+            *) arch="$(uname -m)" ;; \
+        esac; \
+    fi; \
+    case "$arch" in \
+        amd64) rpmarch=x64 ;; \
+        arm64) rpmarch=arm64 ;; \
+        *) echo "unsupported arch for v2rayA rpm: $arch" >&2; exit 1 ;; \
+    esac; \
+    url="${V2RAYA_RPM_URL:-}"; \
     if [ -z "$url" ]; then \
         tag="$(curl -fsSL --retry 3 --retry-all-errors \
             -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/v2rayA/v2rayA/releases/latest | jq -er .tag_name)"; \
         ver="${tag#v}"; \
-        url="https://github.com/v2rayA/v2rayA/releases/download/${tag}/v2raya_linux_x64_${ver}"; \
+        url="https://github.com/v2rayA/v2rayA/releases/download/${tag}/installer_redhat_${rpmarch}_${ver}.rpm"; \
     fi; \
-    curl -fsSL --retry 3 --retry-all-errors -o /tmp/v2raya "$url"; \
-    install -D -m 0755 /tmp/v2raya /usr/bin/v2raya; \
-    rm -f /tmp/v2raya; \
-    curl -fsSL --retry 3 --retry-all-errors -o /tmp/xray.zip \
-        https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip; \
-    install -d /usr/share/xray; \
-    unzip -o -j /tmp/xray.zip xray -d /usr/bin; \
-    unzip -o -j /tmp/xray.zip geoip.dat geosite.dat -d /usr/share/xray; \
-    chmod 0755 /usr/bin/xray; \
-    rm -f /tmp/xray.zip; \
-    install -d -m 0755 /etc/v2raya; \
+    curl -fsSL --retry 3 --retry-all-errors -o /tmp/v2raya.rpm "$url"; \
+    dnf install -y /tmp/v2raya.rpm; \
+    rm -f /tmp/v2raya.rpm; \
+    test -x /usr/bin/v2raya; \
+    test -x /usr/bin/v2raya_core; \
+    test -f /usr/share/v2raya/geoip.dat; \
+    test -f /usr/lib/systemd/system/v2raya.service; \
+    install -d -m 0755 /etc/systemd/system/v2raya.service.d; \
     printf '%s\n' \
-        '[Unit]' \
-        'Description=v2rayA Service' \
-        'After=network.target network-online.target nss-lookup.target nftables.service' \
-        'Wants=network.target' \
-        '' \
         '[Service]' \
-        'Type=simple' \
-        'User=root' \
-        'LimitNPROC=500' \
-        'LimitNOFILE=1000000' \
-        'ExecStart=/usr/bin/v2raya --log-disable-timestamp' \
-        'Environment=V2RAYA_LOG_FILE=/var/log/v2raya/v2raya.log' \
-        'Environment=XRAY_LOCATION_ASSET=/usr/share/xray' \
         'LogsDirectory=v2raya' \
-        'KillMode=mixed' \
-        'Restart=on-failure' \
-        '' \
-        '[Install]' \
-        'WantedBy=multi-user.target' \
-        > /usr/lib/systemd/system/v2raya.service; \
+        > /etc/systemd/system/v2raya.service.d/logs.conf; \
     dnf clean all; \
     systemctl enable v2raya.service
 
@@ -245,9 +240,10 @@ RUN set -eux; \
     locale -a | grep -qx 'zh_CN.utf8'; \
     test -f /usr/share/applications/org.fcitx.Fcitx5.desktop; \
     grep -qx 'InputMethod=/usr/share/applications/org.fcitx.Fcitx5.desktop' /etc/xdg/kwinrc; \
+    rpm -q v2raya; \
     test -x /usr/bin/v2raya; \
-    test -x /usr/bin/xray; \
-    test -f /usr/share/xray/geoip.dat; \
+    test -x /usr/bin/v2raya_core; \
+    test -f /usr/share/v2raya/geoip.dat; \
     test -L /etc/systemd/system/multi-user.target.wants/v2raya.service; \
     test -L /etc/systemd/system/multi-user.target.wants/nvidia-clock-ac.service; \
     test -x /usr/bin/clash-verge-service-install; \
