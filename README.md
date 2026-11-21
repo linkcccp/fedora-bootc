@@ -14,7 +14,7 @@ FROM ${BASE_IMAGE}
 | --- | --- |
 | KDE Plasma（Kinoite 基础） | 中文语言包 + fcitx5 输入法 |
 | NVIDIA 驱动、内核参数、akmods | Clash Verge Rev（GUI + TUN） |
-| ffmpeg / mesa / libva 覆盖 | v2rayA（Web UI + Xray 内核） |
+| ffmpeg / mesa / libva 覆盖 | v2rayA（Web UI + 内置 v2raya_core） |
 | Flathub、Bazaar、flatpak 预装 | NVIDIA 插电锁频服务 |
 | podman / flatpak / distrobox / fish | Maple Mono、JetBrains Nerd Font |
 | Secure Boot 签名、内核跟随 Fedora | Fluent Light 主题 + Fluent11 图标 |
@@ -36,8 +36,10 @@ FROM ${BASE_IMAGE}
 - **Clash Verge Rev**：Tauri GUI；TUN 用的 `clash-verge-service` 不随镜像启用——
   上游 2.5.x 起由 `clash-verge-service-install` 在首次开 TUN 时装进
   `/etc/systemd/system` 与 `/var/lib/clash-verge-service`（可写层，升级不丢）
-- **v2rayA**：静态二进制 + Xray 内核 + geo 数据，`v2raya.service` 已 enable，
-  Web UI 在 `http://127.0.0.1:2017`，支持 `vmess://` / `vless://` / base64 订阅
+- **v2rayA**：官方 redhat rpm（`v2raya` + 配套 `v2raya_core` + geo 数据 +
+  `v2raya.service`），`v2raya.service` 已 enable，Web UI 在 `http://127.0.0.1:2017`，
+  支持 `vmess://` / `vless://` / base64 订阅。2.5.x 起核心版本必须与主程序严格一致，
+  所以核心**不要**换成本机的 xray；改用新版只需改 rpm 地址（CI 自动取 latest）
 
 > 两个客户端**不要同时开 TUN**，会互相抢路由。
 
