@@ -501,29 +501,8 @@ jobs:
                       "$asset_dir"/*
                   fi
 
-            - name: Remove old ISO assets
-              run: |
-                  # Keep the current release plus the two newest previous ISO releases.
-                  kept=0
-                  while IFS= read -r tag; do
-                    [ "$tag" = "$RELEASE_TAG" ] && continue
-                    assets=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null || true)
-                    if ! grep -q '\.iso\.part-' <<< "$assets"; then
-                      continue
-                    fi
-                    if [ "$kept" -lt 2 ]; then
-                      kept=$((kept + 1))
-                      continue
-                    fi
-                    while IFS= read -r name; do
-                      case "$name" in
-                        *.iso.part-*|*.iso.sha256|parts.sha256|iso-README.txt|download-iso.sh|download-iso.ps1|download-iso.cmd)
-                          echo "Deleting $tag/$name"
-                          gh release delete-asset "$tag" "$name" --yes
-                          ;;
-                      esac
-                    done <<< "$assets"
-                  done < <(gh release list --limit 100 --json tagName --jq '.[].tagName')
+            # Release 资产不占配额、不限总量（单文件 < 2 GiB），历史 ISO 全部保留，
+            # 这样 download-iso.sh --version <旧版本> 对任何已发布版本都仍然有效。
 
             - name: Collect failure diagnostics
               if: failure()
