@@ -1,0 +1,262 @@
+name: Build test
+
+# push 到 main 时的构建自检：只验证，不推送镜像、不创建 Release。
+# 覆盖会直接让 release tag 报废的常见失败点：
+#   - Containerfile / iso/Containerfile 构建失败
+#   - chunkah 切层失败
+#   - 镜像无法通过 bootc container lint
+#   - 安装器容器缺少 generic-iso 要求的契约
+# 发布流程：push → 等本 workflow 全绿 → 打 release tag 触发 iso.yml。
+
+on:
+    push:
+        branches:
+            - main
+        # 只对可能影响构建的改动跑；tag 推送不会命中 branches 过滤。
+        paths:
+            - Containerfile
+            - iso/Containerfile
+            - files/**
+            - .github/scripts/**
+            - .github/workflows/**
+    workflow_dispatch:
+        inputs:
+            payload_imgref:
+                description: "PAYLOAD_IMGREF（写入 interactive-defaults.ks，不实际拉取）"
+                required: false
+                default: "ghcr.io/linkcccp/fedora-bootc:test"
+            target_imgref:
+                description: "TARGET_IMGREF（安装后系统跟踪的 ref）"
+                required: false
+                default: "ghcr.io/linkcccp/fedora-bootc:latest"
+
+permissions:
+    contents: read
+
+concurrency:
+    group: build-test-${{ github.ref }}
+    cancel-in-progress: true
+
+env:
+    GH_TOKEN: ${{ github.token }}
+
+jobs:
+    lint:
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v5
+
+            - name: Validate workflow YAML
+              run: |
+                  if ! python3 -c 'import yaml' 2>/dev/null; then
+                    sudo apt-get update
+                    sudo apt-get install --no-install-recommends -y python3-yaml
+                  fi
+                  python3 - <<'PY'
+                  import glob
+                  import yaml
+                  for path in sorted(glob.glob(".github/workflows/*.yml")):
+                      with open(path, encoding="utf-8") as f:
+                          yaml.safe_load(f)
+                      print(f"OK {path}")
+                  PY
+
+            - name: Validate scripts
+              run: |
+                  bash -n .github/scripts/iso/download-iso.sh
+                  bash -n .github/scripts/diff-packages.sh
+                  pwsh -NoProfile -Command '
+                    $tokens = $null
+                    $errors = $null
+                    [System.Management.Automation.Language.Parser]::ParseFile(
+                      ".github/scripts/iso/download-iso.ps1",
+                      [ref]$tokens,
+                      [ref]$errors
+                    ) | Out-Null
+                    if ($errors.Count -gt 0) {
+                      $errors | ForEach-Object { Write-Error $_.Message }
+                      exit 1
+                    }
+                  '
+
+            - name: Guard against heredoc in installer Containerfile
+              run: |
+                  if grep -vE '^[[:space:]]*#' iso/Containerfile | grep -n '<<'; then
+                    echo "::error::iso/Containerfile 仍包含 heredoc 语法，宿主 buildah 可能不支持"
+                    exit 1
+                  fi
+
+    image:
+        runs-on: ubuntu-24.04
+        timeout-minutes: 60
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v5
+
+            - name: Compute image name
+              id: image
+              run: |
+                  image=$(printf 'ghcr.io/%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+                  echo "name=$image" >> "$GITHUB_OUTPUT"
+
+            - name: Free up disk space
+              run: |
+                  sudo rm -rf \
+                    /usr/share/dotnet \
+                    /usr/local/lib/android \
+                    /opt/ghc \
+                    /opt/hostedtoolcache/CodeQL
+                  sudo apt-get clean
+                  df -h /
+
+            - name: Ensure Podman is installed
+              run: |
+                  if ! command -v podman >/dev/null 2>&1; then
+                    sudo apt-get update
+                    sudo apt-get install --no-install-recommends -y podman
+                  fi
+
+            - name: Resolve Clash Verge RPM
+              id: clash
+              run: |
+                  url=$(gh api repos/clash-verge-rev/clash-verge-rev/releases/latest \
+                    --jq '[.assets[] | select(.name | endswith(".x86_64.rpm"))][0].browser_download_url // empty')
+                  test -n "$url"
+                  echo "url=$url" >> "$GITHUB_OUTPUT"
+
+            - name: Resolve v2rayA release
+              id: v2raya
+              run: |
+                  tag=$(gh api repos/v2rayA/v2rayA/releases/latest --jq .tag_name)
+                  ver=${tag#v}
+                  test -n "$tag"
+                  echo "url=https://github.com/v2rayA/v2rayA/releases/download/$tag/installer_redhat_x64_$ver.rpm" >> "$GITHUB_OUTPUT"
+
+            - name: Build image
+              env:
+                  CLASH_VERGE_RPM_URL: ${{ steps.clash.outputs.url }}
+                  V2RAYA_RPM_URL: ${{ steps.v2raya.outputs.url }}
+              run: |
+                  podman build --pull=always \
+                    --build-arg "CLASH_VERGE_RPM_URL=$CLASH_VERGE_RPM_URL" \
+                    --build-arg "V2RAYA_RPM_URL=$V2RAYA_RPM_URL" \
+                    --file Containerfile --tag localhost/fedora-bootc:test .
+
+            - name: Rechunk with chunkah
+              run: |
+                  # 与 iso.yml 的发布流程保持一致，提前暴露切层失败。
+                  set -euo pipefail
+                  out="$(mktemp -d)"
+                  cfg="$(mktemp)"
+                  trap 'rm -rf "$out" "$cfg"' EXIT
+
+                  podman inspect localhost/fedora-bootc:test > "$cfg"
+                  podman run --rm \
+                    --mount=type=image,src=localhost/fedora-bootc:test,target=/chunkah \
+                    -v "$cfg:/chunkah-config.json:ro,Z" \
+                    -v "$out:/run/out:Z" \
+                    quay.io/coreos/chunkah:latest \
+                    build \
+                      --verbose \
+                      --compressed \
+                      --max-layers 256 \
+                      --prune /sysroot/ \
+                      --label ostree.commit- --label ostree.final-diffid- \
+                      --config /chunkah-config.json \
+                      --output oci:/run/out/chunked
+
+                  chunked="$(podman pull "oci:$out/chunked")"
+                  podman tag "$chunked" localhost/fedora-bootc:test
+                  echo "Chunked layers: $(podman inspect --format '{{len .RootFS.Layers}}' localhost/fedora-bootc:test)"
+
+            - name: Lint image with bootc
+              run: podman run --rm localhost/fedora-bootc:test bootc container lint
+
+            - name: Write job summary
+              run: |
+                  {
+                    echo "### Build test: image"
+                    echo "- Layers: $(podman inspect --format '{{len .RootFS.Layers}}' localhost/fedora-bootc:test)"
+                    echo "- Packages: $(podman run --rm localhost/fedora-bootc:test rpm -qa | wc -l)"
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+    installer:
+        runs-on: ubuntu-24.04
+        timeout-minutes: 60
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v5
+
+            - name: Compute image name
+              id: image
+              run: |
+                  image=$(printf 'ghcr.io/%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+                  echo "name=$image" >> "$GITHUB_OUTPUT"
+
+            - name: Ensure Podman is installed
+              run: |
+                  if ! command -v podman >/dev/null 2>&1; then
+                    sudo apt-get update
+                    sudo apt-get install --no-install-recommends -y podman
+                  fi
+
+            - name: Record tool versions
+              run: |
+                  podman --version
+                  podman version
+
+            - name: Build installer container
+              env:
+                  IMAGE_NAME: ${{ steps.image.outputs.name }}
+                  PAYLOAD_IMGREF: ${{ inputs.payload_imgref }}
+                  TARGET_IMGREF: ${{ inputs.target_imgref }}
+              run: |
+                  set -o pipefail
+                  # payload ref 只是写进 ks 的字符串，不需要先构建主镜像，因此与 image job 并行。
+                  payload="${PAYLOAD_IMGREF:-${IMAGE_NAME}:test}"
+                  target="${TARGET_IMGREF:-${IMAGE_NAME}:latest}"
+                  echo "PAYLOAD_IMGREF=$payload"
+                  echo "TARGET_IMGREF=$target"
+                  sudo podman build --pull=missing \
+                    --build-arg "PAYLOAD_IMGREF=$payload" \
+                    --build-arg "TARGET_IMGREF=$target" \
+                    --file iso/Containerfile \
+                    --tag localhost/fedora-bootc-installer:test \
+                    . 2>&1 | tee installer-build.log
+
+            - name: Check installer container contract
+              run: |
+                  sudo podman run --rm localhost/fedora-bootc-installer:test bash -eu -c '
+                    cat /usr/lib/image-builder/bootc/iso.yaml
+                    cat /usr/share/anaconda/interactive-defaults.ks
+                    for tool in podman mksquashfs xorriso implantisomd5 grub2-mkimage python3; do
+                      command -v "$tool"
+                    done
+                    ls -l /usr/lib/modules/*/vmlinuz /usr/lib/modules/*/initramfs.img
+                    ls -d /boot/efi/EFI/*
+                    test -d /usr/lib/grub/i386-pc
+                  '
+
+            - name: Upload build log on failure
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: installer-build-log-${{ github.run_id }}
+                  path: installer-build.log
+                  retention-days: 7
+                  if-no-files-found: warn
+
+            - name: Write job summary
+              run: |
+                  payload="${{ inputs.payload_imgref }}"
+                  target="${{ inputs.target_imgref }}"
+                  [ -n "$payload" ] || payload="${{ steps.image.outputs.name }}:test"
+                  [ -n "$target" ] || target="${{ steps.image.outputs.name }}:latest"
+                  {
+                    echo "### Build test: installer"
+                    echo "- Base: \`quay.io/fedora/fedora-bootc:45\`"
+                    echo "- PAYLOAD_IMGREF: \`$payload\`"
+                    echo "- TARGET_IMGREF: \`$target\`"
+                  } >> "$GITHUB_STEP_SUMMARY"

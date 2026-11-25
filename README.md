@@ -100,6 +100,7 @@ ls /usr/share/plasma/desktoptheme/Fluent-light
 
 | 工作流 | 触发 | 产物 |
 | --- | --- | --- |
+| `build-test.yml` | push 到 `main`（`Containerfile` / `iso/Containerfile` / `files/` / 脚本 / workflow 变更）；手动 | 仅验证：镜像构建 + chunkah 切层 + `bootc container lint` + 安装器契约（不推送、不建 Release） |
 | `iso.yml` | 推送 `release-*` / `Release-*` 标签；每周一 03:00 UTC（北京时间 11:00）；手动 | 容器镜像 + 内嵌镜像的可离线安装 ISO（分卷发布） |
 
 `iso.yml` 会更新 `ghcr.io/linkcccp/fedora-bootc:latest`。
@@ -108,12 +109,26 @@ ISO 通过 `bootc-image-builder` 的 `bootc-generic-iso` 从 `iso/Containerfile`
 安装器环境自行定义（Fedora 45 把仓库配置移到了 `/usr/share/dnf5/repos.d`，
 legacy anaconda-iso 读不到仓库，详见 `iso/Containerfile` 顶部注释）。
 
+### 发布流程
+
+1. 改动推到 `main`，等 `Build test` 全绿（主镜像与安装器容器并行验证）
+2. 打 tag 并推送：
+   ```sh
+   tag="release-$(TZ=Asia/Shanghai date +%Y.%m.%d.%H%M)"
+   git tag "$tag"
+   git push origin "$tag"
+   ```
+3. `iso.yml` 构建镜像与 ISO，成功后创建 GitHub Release
+
+这样 release tag 只会在构建已经验证通过后产生，避免打 tag 后才发现 Containerfile 报错。
+
 ## 目录
 
 ```
 Containerfile                 # 全部定制（中文 / 代理 / 服务 / 外观）
 files/nvidia-clock/           # 锁频脚本、systemd 单元、udev 规则
 iso/Containerfile             # ISO 安装器容器
+.github/workflows/build-test.yml  # push 时的构建自检（不推送、不建 Release）
 .github/workflows/iso.yml     # 容器镜像 + ISO 构建与发布
 .github/scripts/iso/          # ISO 分卷下载脚本（sh / ps1 / cmd）
 .github/scripts/diff-packages.sh

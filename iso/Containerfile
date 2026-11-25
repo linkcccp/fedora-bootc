@@ -7,8 +7,8 @@
 # 因此改用 image-builder 的 bootc-generic-iso：安装器环境由本文件自行定义，
 # 仓库布局、dracut、Anaconda 环境调整全部显式声明。
 #
-# 该镜像只在 GitHub Actions 的 iso job 中构建（iso.yml → Build installer container），
-# 本地不参与构建；需要验证时使用 Actions 页面的 workflow_dispatch 手动运行。
+# 该镜像在 GitHub Actions 中由 iso.yml 的 iso job 正式构建；本地不参与构建。
+# 改动后先推 main，让 build-test.yml 的 installer job 验证契约，绿了再打 release tag。
 #
 # 写文件一律用 `printf '%s\n' ... > file`，不要用 heredoc（`RUN cat <<EOF` / `COPY <<EOF`）。
 # GitHub Actions 的 ubuntu-24.04 通过 apt 安装的 podman/buildah 由 Debian 打包，
