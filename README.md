@@ -100,10 +100,9 @@ ls /usr/share/plasma/desktoptheme/Fluent-light
 
 | 工作流 | 触发 | 产物 |
 | --- | --- | --- |
-| `dev.yml` | 推送 `dev-*` / `Dev-*` 标签；每 3 天 21:00 UTC（北京时间 05:00） | 容器镜像 + GitHub Release（含软件包差异、下载脚本） |
 | `iso.yml` | 推送 `release-*` / `Release-*` 标签；每周一 03:00 UTC（北京时间 11:00）；手动 | 容器镜像 + 内嵌镜像的可离线安装 ISO（分卷发布） |
 
-两者都会更新 `ghcr.io/linkcccp/fedora-bootc:latest`。
+`iso.yml` 会更新 `ghcr.io/linkcccp/fedora-bootc:latest`。
 
 ISO 通过 `bootc-image-builder` 的 `bootc-generic-iso` 从 `iso/Containerfile` 构建，
 安装器环境自行定义（Fedora 45 把仓库配置移到了 `/usr/share/dnf5/repos.d`，
@@ -115,8 +114,7 @@ legacy anaconda-iso 读不到仓库，详见 `iso/Containerfile` 顶部注释）
 Containerfile                 # 全部定制（中文 / 代理 / 服务 / 外观）
 files/nvidia-clock/           # 锁频脚本、systemd 单元、udev 规则
 iso/Containerfile             # ISO 安装器容器
-.github/workflows/dev.yml     # 容器镜像构建
-.github/workflows/iso.yml     # ISO 构建与发布
+.github/workflows/iso.yml     # 容器镜像 + ISO 构建与发布
 .github/scripts/iso/          # ISO 分卷下载脚本（sh / ps1 / cmd）
 .github/scripts/diff-packages.sh
 ```
