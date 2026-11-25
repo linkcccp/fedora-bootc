@@ -16,7 +16,8 @@ permissions:
     contents: read
 
 concurrency:
-    group: iso-${{ github.ref }}
+    # 全局串行：镜像构建与 ISO 构建同一时刻只跑一份，避免多个 run 交叉覆盖 :latest。
+    group: iso
     cancel-in-progress: false
 
 jobs:
@@ -145,6 +146,7 @@ jobs:
 
                   chunked="$(podman pull "oci:$out/chunked")"
                   podman tag "$chunked" "$IMAGE_NAME:$IMAGE_TAG"
+                  echo "Chunked layers: $(podman inspect --format '{{len .RootFS.Layers}}' "$IMAGE_NAME:$IMAGE_TAG")"
 
             - name: Push image
               env:
