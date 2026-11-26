@@ -13,11 +13,22 @@ state=/var/lib/grub-theme
 mountpoint -q /boot || exit 0
 
 # 1. BLS 条目补 grub_class：blscfg 用它去主题 icons/ 里找图标。
-#    GRUB 按顺序取第一个存在的图标，所以带上回退链。
+#    blscfg 的 bls_get_val 不拆分空格，一个 class 必须占一行；
+#    GRUB 的 icon_manager 按行序取第一个存在的图标，所以这里是回退链。
 #    条目每次部署都会被 ostree 重写，所以每次启动都补一遍（幂等）。
 shopt -s nullglob
 for f in "$bls_dir"/*.conf; do
-    grep -q '^grub_class ' "$f" || printf '%s\n' 'grub_class fedora gnu-linux linux os' >>"$f"
+    # 末行没有换行时先补一个，否则追加会拼到 initrd 那一行上
+    if [ -s "$f" ] && [ "$(tail -c 1 "$f" | wc -l)" -eq 0 ]; then
+        printf '\n' >>"$f"
+    fi
+    # 清掉早期版本写坏的一行多 class（blscfg 会把整行当成一个 class 名）
+    if grep -q '^grub_class [^ ]* ' "$f"; then
+        sed -i '/^grub_class [^ ]* /d' "$f"
+    fi
+    for c in fedora gnu-linux linux; do
+        grep -qx "grub_class $c" "$f" || printf 'grub_class %s\n' "$c" >>"$f"
+    done
 done
 
 # 2. 主题版本没变、grub.cfg 里也还有主题，就什么都不做
