@@ -67,6 +67,7 @@ jobs:
               run: |
                   bash -n .github/scripts/iso/download-iso.sh
                   bash -n .github/scripts/diff-packages.sh
+                  bash -n files/grub/grub-theme-sync
                   pwsh -NoProfile -Command '
                     $tokens = $null
                     $errors = $null
@@ -85,6 +86,14 @@ jobs:
               run: |
                   if grep -vE '^[[:space:]]*#' iso/Containerfile | grep -n '<<'; then
                     echo "::error::iso/Containerfile 仍包含 heredoc 语法，宿主 buildah 可能不支持"
+                    exit 1
+                  fi
+
+            - name: Guard /boot stays empty in the image
+              run: |
+                  # bootc 运行时会把镜像里的 /boot mask 掉，往里面 COPY 是无效动作
+                  if grep -nE '^(COPY|ADD)[[:space:]].*[[:space:]]/boot(/|[[:space:]]|$)' Containerfile; then
+                    echo "::error::Containerfile 往 /boot 里 COPY 内容"
                     exit 1
                   fi
 

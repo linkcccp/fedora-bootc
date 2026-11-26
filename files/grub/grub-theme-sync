@@ -1,0 +1,51 @@
+#!/bin/bash
+# 把镜像里的 Vimix 主题落到 /boot，并给 BLS 条目补 grub_class（菜单图标）。
+# bootc 镜像里的 /boot 在运行时会被真实分区 mask，所以只能在启动后做。
+set -euo pipefail
+
+theme_src=/usr/share/grub/themes/vimix
+theme_dst=/boot/grub2/themes/vimix
+grub_cfg=/boot/grub2/grub.cfg
+bls_dir=/boot/loader/entries
+state=/var/lib/grub-theme
+
+# 容器 / chroot 里没有真实 /boot，直接跳过
+mountpoint -q /boot || exit 0
+
+# 1. BLS 条目补 grub_class：blscfg 用它去主题 icons/ 里找图标。
+#    条目每次部署都会被 ostree 重写，所以每次启动都补一遍（幂等）。
+shopt -s nullglob
+for f in "$bls_dir"/*.conf; do
+    grep -q '^grub_class ' "$f" || printf '%s\n' 'grub_class fedora' >>"$f"
+done
+
+# 2. 主题版本没变、grub.cfg 里也还有主题，就什么都不做
+want=$(cat "$theme_src/VERSION")
+have=$(cat "$state/version" 2>/dev/null || echo none)
+if [ "$want" = "$have" ] && grep -q 'set theme=' "$grub_cfg" 2>/dev/null; then
+    exit 0
+fi
+
+# 3. 同步主题文件
+install -d -m 0755 "$theme_dst"
+cp -a "$theme_src/." "$theme_dst/"
+restorecon -R "$theme_dst" 2>/dev/null || true
+
+# 4. 重新生成 grub.cfg
+#    --no-grubenv-update 必须加：否则 10_linux 会重写 BLS 的 options，冲掉 ostree=。
+#    /etc/default/grub 里的 GRUB_GRUBENV_UPDATE=no 是第二道保险。
+if [ -f "$grub_cfg" ] && [ ! -f "$grub_cfg.bak" ]; then
+    cp -a "$grub_cfg" "$grub_cfg.bak"
+fi
+
+ostree_before=$(grep -h '^options ' "$bls_dir"/*.conf 2>/dev/null | grep -c 'ostree=' || true)
+grub2-mkconfig --no-grubenv-update -o "$grub_cfg"
+ostree_after=$(grep -h '^options ' "$bls_dir"/*.conf 2>/dev/null | grep -c 'ostree=' || true)
+
+if [ "$ostree_after" -lt "$ostree_before" ]; then
+    echo "grub-theme-sync: BLS options lost ostree= ($ostree_before -> $ostree_after)" >&2
+    exit 1
+fi
+
+install -d -m 0755 "$state"
+printf '%s\n' "$want" >"$state/version"

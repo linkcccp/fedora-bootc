@@ -17,7 +17,7 @@ FROM ${BASE_IMAGE}
 | ffmpeg / mesa / libva 覆盖 | v2rayA（Web UI + 内置 v2raya_core） |
 | Flathub、Bazaar、flatpak 预装 | NVIDIA 插电锁频服务 |
 | podman / flatpak / distrobox / fish | Maple Mono、JetBrains Nerd Font |
-| Secure Boot 签名、内核跟随 Fedora | Fluent Light 主题 + Fluent11 图标 |
+| Secure Boot 签名、内核跟随 Fedora | Fluent Light 主题 + Fluent11 图标 + Vimix GRUB 主题 |
 
 > 非 NVIDIA 机器把 `ARG BASE_IMAGE` 改成 `ghcr.io/ublue-os/aurora:stable` 即可。
 
@@ -54,6 +54,9 @@ FROM ${BASE_IMAGE}
 - 字体：`/usr/share/fonts/maple-mono`、`/usr/share/fonts/nerd-fonts/JetBrainsMono`
 - 主题：Fluent Light（Aurorae 装饰 / Plasma 主题 / 配色方案）+ Fluent11 图标
 - `/etc/xdg/{kdeglobals,plasmarc,kwinrc}` 写入系统级默认值，用户 `~/.config` 仍可覆盖
+- GRUB：Vimix（4K 资源），文件在 `files/grub/vimix`；bootc 运行时 `/boot` 是独立分区，
+  镜像里的 `/boot` 会被 mask，所以主题装在 `/usr/share`，由 `grub-theme-sync.service`
+  在首次启动后同步进 `/boot` 并重生成 `grub.cfg`（第二次启动起可见）
 
 ## 构建
 
@@ -127,6 +130,7 @@ legacy anaconda-iso 读不到仓库，详见 `iso/Containerfile` 顶部注释）
 ```
 Containerfile                 # 全部定制（中文 / 代理 / 服务 / 外观）
 files/nvidia-clock/           # 锁频脚本、systemd 单元、udev 规则
+files/grub/                   # Vimix 主题资源、/etc/default/grub、同步服务
 iso/Containerfile             # ISO 安装器容器
 .github/workflows/build-test.yml  # push 时的构建自检（不推送、不建 Release）
 .github/workflows/iso.yml     # 容器镜像 + ISO 构建与发布

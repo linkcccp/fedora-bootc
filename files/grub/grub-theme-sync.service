@@ -1,0 +1,15 @@
+[Unit]
+Description=Sync Vimix GRUB theme into /boot
+Documentation=https://github.com/vinceliuice/grub2-themes
+After=local-fs.target
+RequiresMountsFor=/boot
+ConditionPathIsDirectory=/usr/share/grub/themes/vimix
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/grub-theme-sync
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

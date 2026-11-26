@@ -1,0 +1,17 @@
+# 由 fedora-bootc 镜像提供，见 Containerfile「GRUB 主题」一节。
+# 注意：ostree/bootc 上不要裸跑 grub2-mkconfig，必须带 --no-grubenv-update。
+GRUB_TIMEOUT=5
+GRUB_TIMEOUT_STYLE=menu
+GRUB_DISTRIBUTOR="Fedora Linux"
+GRUB_DEFAULT=saved
+GRUB_DISABLE_SUBMENU=true
+GRUB_DISABLE_RECOVERY="true"
+GRUB_CMDLINE_LINUX="rhgb quiet"
+GRUB_ENABLE_BLSCFG=true
+GRUB_TERMINAL_OUTPUT="gfxterm"
+GRUB_GFXMODE=2560x1600,auto
+GRUB_THEME="/boot/grub2/themes/vimix/theme.txt"
+# grub2-mkconfig 先 export 该变量为 yes、之后才 source 本文件，
+# 所以这里设 no 能兜住“有人裸跑 grub2-mkconfig”的情况，
+# 避免 10_linux 重写 BLS 的 options、冲掉 ostree= 导致无法启动。
+GRUB_GRUBENV_UPDATE=no

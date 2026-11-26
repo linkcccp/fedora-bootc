@@ -233,6 +233,31 @@ RUN set -eux; \
         __aurorae__svg__Fluent-light
 
 # ---------------------------------------------------------------------------
+# 5. GRUB 主题（Vimix，4K 资源，随仓库分发）
+# ---------------------------------------------------------------------------
+# 主题文件直接放在 files/grub/vimix，构建时不访问 GitHub：
+# 不走 api.github.com 的匿名配额，也不用把 token 塞进镜像 history。
+# bootc 的 /boot 在运行时是独立分区，镜像里 /boot 的内容会被 mask
+# （bootc lint 的 nonempty-boot），所以主题装进 /usr/share，
+# 由 grub-theme-sync.service 在每次启动时同步到 /boot。
+COPY files/grub/vimix /usr/share/grub/themes/vimix
+COPY files/grub/default-grub /etc/default/grub
+COPY files/grub/grub-theme-sync /usr/libexec/grub-theme-sync
+COPY files/grub/grub-theme-sync.service /usr/lib/systemd/system/grub-theme-sync.service
+COPY files/grub/grub2-themes.LICENSE /usr/share/licenses/grub2-themes/LICENSE
+RUN set -eux; \
+    theme=/usr/share/grub/themes/vimix; \
+    chmod 0755 /usr/libexec/grub-theme-sync; \
+    bash -n /usr/libexec/grub-theme-sync; \
+    test -s "$theme/theme.txt"; \
+    test -s "$theme/background.jpg"; \
+    test -s "$theme/dejavu_sans_32.pf2"; \
+    test -s "$theme/terminus-18.pf2"; \
+    test -s "$theme/icons/fedora.png"; \
+    systemctl enable grub-theme-sync.service; \
+    test -L /etc/systemd/system/multi-user.target.wants/grub-theme-sync.service
+
+# ---------------------------------------------------------------------------
 # 自检
 # ---------------------------------------------------------------------------
 RUN set -eux; \
@@ -254,4 +279,8 @@ RUN set -eux; \
     test -d /usr/share/aurorae/themes/Fluent-light; \
     test -f /usr/share/icons/fluent11/index.theme; \
     grep -qx 'ColorScheme=FluentLight' /etc/xdg/kdeglobals; \
+    grep -qx 'GRUB_THEME="/boot/grub2/themes/vimix/theme.txt"' /etc/default/grub; \
+    grep -qx 'GRUB_GRUBENV_UPDATE=no' /etc/default/grub; \
+    test -L /etc/systemd/system/multi-user.target.wants/grub-theme-sync.service; \
+    test ! -e /boot/grub2/themes; \
     bootc container lint
