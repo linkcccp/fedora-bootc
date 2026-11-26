@@ -47,6 +47,19 @@ jobs:
         steps:
             - name: Check out repository
               uses: actions/checkout@v5
+              with:
+                  lfs: true
+
+            - name: Verify Git LFS assets
+              run: |
+                  # LFS 对象没检出时，工作区里留下的是指针文本，构建出的主题会是坏的
+                  for f in files/grub/vimix/background.jpg files/grub/library/icons/color/4k/fedora.png; do
+                    if head -c 64 "$f" | grep -q 'version https://git-lfs'; then
+                      echo "::error::$f 仍是 LFS 指针，checkout 没有拉取 LFS 对象"
+                      exit 1
+                    fi
+                  done
+                  test "$(find files/grub -name '*.png' | wc -l)" -ge 800
 
             - name: Validate workflow YAML
               run: |
@@ -103,6 +116,8 @@ jobs:
         steps:
             - name: Check out repository
               uses: actions/checkout@v5
+              with:
+                  lfs: true
 
             - name: Compute image name
               id: image
@@ -197,6 +212,8 @@ jobs:
         steps:
             - name: Check out repository
               uses: actions/checkout@v5
+              with:
+                  lfs: true
 
             - name: Compute image name
               id: image

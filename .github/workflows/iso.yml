@@ -66,6 +66,8 @@ jobs:
         steps:
             - name: Check out repository
               uses: actions/checkout@v5
+              with:
+                  lfs: true
 
             - name: Free up disk space
               run: |
@@ -199,6 +201,8 @@ jobs:
         steps:
             - name: Check out repository
               uses: actions/checkout@v5
+              with:
+                  lfs: true
 
             - name: Validate ISO download scripts
               run: |

@@ -255,6 +255,8 @@ RUN set -eux; \
     bash -n /usr/libexec/grub-theme-sync; \
     test -s "$theme/theme.txt"; \
     test -s "$theme/background.jpg"; \
+    test "$(head -c 3 "$theme/background.jpg" | od -An -tx1 | tr -d ' \n')" = ffd8ff; \
+    test "$(head -c 4 "$theme/icons/fedora.png" | od -An -tx1 | tr -d ' \n')" = 89504e47; \
     test -s "$theme/dejavu_sans_32.pf2"; \
     test -s "$theme/terminus-18.pf2"; \
     test -s "$theme/icons/fedora.png"; \
