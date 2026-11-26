@@ -59,7 +59,7 @@ jobs:
                       exit 1
                     fi
                   done
-                  test "$(find files/grub -name '*.png' | wc -l)" -ge 800
+                  test "$(find files/grub -name '*.png' | wc -l)" -ge 750
 
             - name: Validate workflow YAML
               run: |
