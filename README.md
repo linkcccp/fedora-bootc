@@ -73,6 +73,27 @@ podman build -f Containerfile -t ghcr.io/linkcccp/fedora-bootc:latest .
 CI 会传入 `--build-arg CLASH_VERGE_RPM_URL=...`（经认证 API 解析的最新 rpm）；
 本地不传时容器内回退到公开 GitHub API。
 
+## 二进制资源（Git LFS）
+
+`files/grub/` 下的图标、背景、GRUB 字体（818 个文件，约 23MB）由 Git LFS 管理。
+克隆后如果没装 git-lfs，工作区里会是指针文本：
+
+```sh
+git lfs install
+git lfs pull
+```
+
+CI 的 `actions/checkout` 已加 `lfs: true`；lint job 会检查工作区不是指针文本，
+Containerfile 还会校验 PNG/JPEG 文件头，指针混进镜像会直接构建失败。
+
+迁移时没有重写历史，`84f631c` 之前的提交仍把原始二进制存在普通 git 对象里
+（`.git` 约 13MB）。要彻底清掉需要重写历史并 force push：
+
+```sh
+git lfs migrate import --everything --include="*.png,*.jpg,*.pf2"
+git push --force --all
+```
+
 ## 切换到该镜像
 
 ```sh
