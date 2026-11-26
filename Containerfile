@@ -256,7 +256,9 @@ RUN set -eux; \
     test -s "$theme/icons/fedora.png"; \
     test -s "$theme/icons/windows.png"; \
     test -s "$theme/icons/macosx.png"; \
+    test -s "$theme/icons/macos.png"; \
     test -s "$theme/icons/chromeos.png"; \
+    test -s "$theme/icons/chrome.png"; \
     systemctl enable grub-theme-sync.service; \
     test -L /etc/systemd/system/multi-user.target.wants/grub-theme-sync.service
 
