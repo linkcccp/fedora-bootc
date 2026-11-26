@@ -57,6 +57,8 @@ FROM ${BASE_IMAGE}
 - GRUB：Vimix（4K 资源），文件在 `files/grub/vimix`；bootc 运行时 `/boot` 是独立分区，
   镜像里的 `/boot` 会被 mask，所以主题装在 `/usr/share`，由 `grub-theme-sync.service`
   在首次启动后同步进 `/boot` 并重生成 `grub.cfg`（第二次启动起可见）
+  图标集是完整版：各 Linux 发行版 + Windows / macOS / ChromeOS（`osx.png`、`darwin.png`、
+  `chromeos.png` 是对齐 GRUB class 名的别名），菜单项靠 BLS 的 `grub_class` 取图标
 
 ## 构建
 

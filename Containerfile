@@ -254,6 +254,9 @@ RUN set -eux; \
     test -s "$theme/dejavu_sans_32.pf2"; \
     test -s "$theme/terminus-18.pf2"; \
     test -s "$theme/icons/fedora.png"; \
+    test -s "$theme/icons/windows.png"; \
+    test -s "$theme/icons/macosx.png"; \
+    test -s "$theme/icons/chromeos.png"; \
     systemctl enable grub-theme-sync.service; \
     test -L /etc/systemd/system/multi-user.target.wants/grub-theme-sync.service
 
