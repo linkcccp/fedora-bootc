@@ -241,12 +241,16 @@ RUN set -eux; \
 # （bootc lint 的 nonempty-boot），所以主题装进 /usr/share，
 # 由 grub-theme-sync.service 在每次启动时同步到 /boot。
 COPY files/grub/vimix /usr/share/grub/themes/vimix
+# 上游完整资产库（3 配色 × 3 分辨率图标、20 张背景、13 个字体、5 套布局）。
+# 只作为备用，不参与启动；换配色/分辨率的方法见 library/README.md。
+COPY files/grub/library /usr/share/grub/grub2-themes
 COPY files/grub/default-grub /etc/default/grub
 COPY files/grub/grub-theme-sync /usr/libexec/grub-theme-sync
 COPY files/grub/grub-theme-sync.service /usr/lib/systemd/system/grub-theme-sync.service
 COPY files/grub/grub2-themes.LICENSE /usr/share/licenses/grub2-themes/LICENSE
 RUN set -eux; \
     theme=/usr/share/grub/themes/vimix; \
+    lib=/usr/share/grub/grub2-themes; \
     chmod 0755 /usr/libexec/grub-theme-sync; \
     bash -n /usr/libexec/grub-theme-sync; \
     test -s "$theme/theme.txt"; \
@@ -259,6 +263,12 @@ RUN set -eux; \
     test -s "$theme/icons/macos.png"; \
     test -s "$theme/icons/chromeos.png"; \
     test -s "$theme/icons/chrome.png"; \
+    test "$(find "$lib/icons" -name '*.png' | wc -l)" -eq 684; \
+    test "$(find "$lib/backgrounds" -name '*.jpg' | wc -l)" -eq 20; \
+    test "$(find "$lib/fonts" -name '*.pf2' | wc -l)" -eq 13; \
+    test "$(find "$lib/config" -name 'theme-*.txt' | wc -l)" -eq 5; \
+    test "$(find "$lib/select" -name 'select_*.png' | wc -l)" -eq 9; \
+    test -s "$lib/info/info-4k.png"; \
     systemctl enable grub-theme-sync.service; \
     test -L /etc/systemd/system/multi-user.target.wants/grub-theme-sync.service
 

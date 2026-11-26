@@ -58,7 +58,11 @@ FROM ${BASE_IMAGE}
   镜像里的 `/boot` 会被 mask，所以主题装在 `/usr/share`，由 `grub-theme-sync.service`
   在首次启动后同步进 `/boot` 并重生成 `grub.cfg`（第二次启动起可见）
   图标集是完整版：各 Linux 发行版 + Windows / macOS / ChromeOS（`osx.png`、`darwin.png`、
-  `chromeos.png` 是对齐 GRUB class 名的别名），菜单项靠 BLS 的 `grub_class` 取图标
+  `chromeos.png`、`macos.png`、`chrome.png` 是对齐 GRUB class 名的别名），菜单项靠 BLS 的
+  `grub_class` 取图标
+- GRUB 资产库：上游 grub2-themes 全量（3 配色 × 3 分辨率共 684 个图标、20 张背景、
+  13 个 pf2 字体、5 套布局），装在 `/usr/share/grub/grub2-themes`，换配色/分辨率见
+  `files/grub/library/README.md`
 
 ## 构建
 
@@ -133,6 +137,7 @@ legacy anaconda-iso 读不到仓库，详见 `iso/Containerfile` 顶部注释）
 Containerfile                 # 全部定制（中文 / 代理 / 服务 / 外观）
 files/nvidia-clock/           # 锁频脚本、systemd 单元、udev 规则
 files/grub/                   # Vimix 主题资源、/etc/default/grub、同步服务
+files/grub/library/           # 上游 grub2-themes 完整资产库（备用配色/分辨率/背景/字体）
 iso/Containerfile             # ISO 安装器容器
 .github/workflows/build-test.yml  # push 时的构建自检（不推送、不建 Release）
 .github/workflows/iso.yml     # 容器镜像 + ISO 构建与发布
