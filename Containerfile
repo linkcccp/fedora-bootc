@@ -19,9 +19,21 @@
 #   podman build -f Containerfile -t ghcr.io/linkcccp/fedora-bootc:latest .
 # 切换：
 #   sudo bootc switch ghcr.io/linkcccp/fedora-bootc:latest
+#
+# 版本号由 CI 通过 build-arg 传入（格式与上游一致：latest-<Fedora 大版本>.<YYYYMMDD>.<当天序号>）；
+# 本地不传时是 dev，用于区分「自己构建的镜像」和上游基座：
+#   --build-arg BUILD_VERSION=latest-45.20261127.2
+#   --build-arg BUILD_REVISION=$(git rev-parse --short=7 HEAD)
+#   --build-arg BUILD_CREATED=$(git log -1 --format=%cI)
 
 ARG BASE_IMAGE=ghcr.io/ublue-os/aurora-dx-nvidia-open:latest
 FROM ${BASE_IMAGE}
+
+# 自有构建版本（见文件头）。BUILD_CREATED 用 commit 时间而不是 date，
+# 保证同样的提交重复构建得到同样的 label。
+ARG BUILD_VERSION=dev
+ARG BUILD_REVISION=unknown
+ARG BUILD_CREATED=1970-01-01T00:00:00Z
 
 # bootc 里 /opt 指向 /var/opt，而构建阶段 /var 是 tmpfs：
 # 换成真实目录，避免第三方包把内容写进会被丢弃的 /var。
@@ -280,6 +292,40 @@ RUN set -eux; \
     test -L /etc/systemd/system/multi-user.target.wants/grub-theme-sync.service
 
 # ---------------------------------------------------------------------------
+# 6. 版本号：替换从上游 aurora 继承的版本号
+# ---------------------------------------------------------------------------
+# 版本号有两个独立来源，缺一不可：
+#   - OCI label org.opencontainers.image.version → `bootc status` 的 Version
+#     （bootc 只读 config label，不读 manifest annotation）
+#   - /usr/lib/os-release → GRUB 标题 / hostnamectl / fastfetch / KDE「关于」
+# /etc/os-release 是 ../usr/lib/os-release 的符号链接，改后者即可。
+# 字段沿用上游 ublue 的写法：VERSION 带变体后缀，PRETTY_NAME/OSTREE_VERSION/
+# IMAGE_VERSION 是纯版本串；VERSION_ID=45 不动（dnf 的 $releasever 依赖它）。
+# 上游基座的版本另存一份，方便排查。
+LABEL org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.opencontainers.image.revision="${BUILD_REVISION}" \
+      org.opencontainers.image.created="${BUILD_CREATED}" \
+      org.opencontainers.image.title="fedora-bootc"
+
+RUN set -eux; \
+    install -d /usr/share/fedora-bootc; \
+    sed -n 's/^IMAGE_VERSION="\(.*\)"$/\1/p' /usr/lib/os-release \
+        > /usr/share/fedora-bootc/upstream-version; \
+    test -s /usr/share/fedora-bootc/upstream-version; \
+    sed -i \
+        -e "s|^VERSION=.*|VERSION=\"${BUILD_VERSION} (Kinoite)\"|" \
+        -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"Aurora (Version: ${BUILD_VERSION})\"|" \
+        -e "s|^IMAGE_VERSION=.*|IMAGE_VERSION=\"${BUILD_VERSION}\"|" \
+        -e "s|^OSTREE_VERSION=.*|OSTREE_VERSION='${BUILD_VERSION}'|" \
+        -e "s|^BUILD_ID=.*|BUILD_ID=\"${BUILD_REVISION}\"|" \
+        /usr/lib/os-release; \
+    grep -qx "VERSION=\"${BUILD_VERSION} (Kinoite)\"" /usr/lib/os-release; \
+    grep -qx "PRETTY_NAME=\"Aurora (Version: ${BUILD_VERSION})\"" /usr/lib/os-release; \
+    grep -qx "IMAGE_VERSION=\"${BUILD_VERSION}\"" /usr/lib/os-release; \
+    grep -qx "OSTREE_VERSION='${BUILD_VERSION}'" /usr/lib/os-release; \
+    grep -qx "BUILD_ID=\"${BUILD_REVISION}\"" /usr/lib/os-release
+
+# ---------------------------------------------------------------------------
 # 自检
 # ---------------------------------------------------------------------------
 RUN set -eux; \
@@ -305,4 +351,6 @@ RUN set -eux; \
     grep -qx 'GRUB_GRUBENV_UPDATE=no' /etc/default/grub; \
     test -L /etc/systemd/system/multi-user.target.wants/grub-theme-sync.service; \
     test ! -e /boot/grub2/themes; \
+    test -s /usr/share/fedora-bootc/upstream-version; \
+    grep -qx "PRETTY_NAME=\"Aurora (Version: ${BUILD_VERSION})\"" /usr/lib/os-release; \
     bootc container lint

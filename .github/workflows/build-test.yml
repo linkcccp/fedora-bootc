@@ -163,9 +163,17 @@ jobs:
                   CLASH_VERGE_RPM_URL: ${{ steps.clash.outputs.url }}
                   V2RAYA_RPM_URL: ${{ steps.v2raya.outputs.url }}
               run: |
+                  # 与 iso.yml 用同一套版本注入逻辑，确保 CI 验证的就是发布镜像的结构。
+                  revision=$(git rev-parse --short=7 HEAD)
+                  created=$(git log -1 --format=%cI)
+                  version="test-$revision"
+                  echo "BUILD_VERSION=$version" >> "$GITHUB_ENV"
                   podman build --pull=always \
                     --build-arg "CLASH_VERGE_RPM_URL=$CLASH_VERGE_RPM_URL" \
                     --build-arg "V2RAYA_RPM_URL=$V2RAYA_RPM_URL" \
+                    --build-arg "BUILD_VERSION=$version" \
+                    --build-arg "BUILD_REVISION=$revision" \
+                    --build-arg "BUILD_CREATED=$created" \
                     --file Containerfile --tag localhost/fedora-bootc:test .
 
             - name: Rechunk with chunkah
@@ -195,6 +203,16 @@ jobs:
                   podman tag "$chunked" localhost/fedora-bootc:test
                   echo "Chunked layers: $(podman inspect --format '{{len .RootFS.Layers}}' localhost/fedora-bootc:test)"
 
+            - name: Verify version metadata
+              run: |
+                  # 确认 chunkah 重建 config 后，自定义版本号（label 与 os-release）仍在。
+                  set -euo pipefail
+                  label=$(podman inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' localhost/fedora-bootc:test)
+                  test "$label" = "$BUILD_VERSION"
+                  podman run --rm localhost/fedora-bootc:test \
+                    grep -qx "PRETTY_NAME=\"Aurora (Version: ${BUILD_VERSION})\"" /usr/lib/os-release
+                  echo "Version: $label"
+
             - name: Lint image with bootc
               run: podman run --rm localhost/fedora-bootc:test bootc container lint
 
@@ -202,6 +220,7 @@ jobs:
               run: |
                   {
                     echo "### Build test: image"
+                    echo "- Version: \`$BUILD_VERSION\`"
                     echo "- Layers: $(podman inspect --format '{{len .RootFS.Layers}}' localhost/fedora-bootc:test)"
                     echo "- Packages: $(podman run --rm localhost/fedora-bootc:test rpm -qa | wc -l)"
                   } >> "$GITHUB_STEP_SUMMARY"

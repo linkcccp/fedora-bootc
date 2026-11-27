@@ -23,20 +23,95 @@ concurrency:
 jobs:
     prepare:
         runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+            packages: read
         outputs:
             version: ${{ steps.meta.outputs.version }}
+            image_version: ${{ steps.meta.outputs.image_version }}
             release_tag: ${{ steps.meta.outputs.release_tag }}
             image_tag: ${{ steps.meta.outputs.image_tag }}
             image_name: ${{ steps.meta.outputs.image_name }}
         steps:
+            - name: Check out repository
+              uses: actions/checkout@v5
+
+            - name: Ensure skopeo and jq are installed
+              run: |
+                  packages=()
+                  command -v skopeo >/dev/null 2>&1 || packages+=(skopeo)
+                  command -v jq >/dev/null 2>&1 || packages+=(jq)
+                  if [ "${#packages[@]}" -gt 0 ]; then
+                    sudo apt-get update
+                    sudo apt-get install --no-install-recommends -y "${packages[@]}"
+                  fi
+
+            - name: Log in to GitHub Container Registry
+              env:
+                  REGISTRY_USERNAME: ${{ github.actor }}
+                  REGISTRY_PASSWORD: ${{ github.token }}
+                  REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
+              run: printf '%s' "$REGISTRY_PASSWORD" | skopeo login ghcr.io --authfile "$REGISTRY_AUTH_FILE" --username "$REGISTRY_USERNAME" --password-stdin
+
             - name: Resolve release metadata
               id: meta
+              env:
+                  REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
               run: |
+                  set -euo pipefail
                   image_name=$(printf 'ghcr.io/%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+
+                  # Fedora 大版本沿用基座镜像的版本号前缀（latest-45.x / 45.x）。
+                  base_ref=$(sed -n 's/^ARG BASE_IMAGE=//p' Containerfile | head -n1)
+                  test -n "$base_ref"
+                  base_version=$(skopeo inspect --authfile "$REGISTRY_AUTH_FILE" \
+                    "docker://${base_ref}" \
+                    | jq -r '.Labels["org.opencontainers.image.version"] // .Labels["version"] // empty')
+                  test -n "$base_version"
+                  fedora=$(printf '%s' "$base_version" | sed -E 's/^[A-Za-z-]*([0-9]+)\..*$/\1/')
+                  case "$fedora" in
+                    ''|*[!0-9]*)
+                      echo "::error::Cannot parse Fedora version from base image version: $base_version"
+                      exit 1
+                      ;;
+                  esac
+
+                  today=$(TZ=Asia/Shanghai date +%Y%m%d)
+                  prefix="latest-${fedora}.${today}."
+
+                  # 当天构建序号：以仓库里 latest-<fedora>.<date>.<N> 的 tag 为准，
+                  # 每个成功构建都会推一个，失败的构建不消耗序号。
+                  point=0
+                  if tags_json=$(skopeo list-tags --authfile "$REGISTRY_AUTH_FILE" \
+                      "docker://${image_name}" 2>/dev/null); then
+                    point=$(printf '%s' "$tags_json" \
+                      | jq -r --arg p "$prefix" \
+                        '[.Tags[]? | select(startswith($p)) | .[($p|length):]
+                          | select(test("^[0-9]+$")) | tonumber] | max // 0')
+                  fi
+
+                  # 衔接：切换当天 :latest 还带着基座的版本号，把它也算一次构建。
+                  current=$(skopeo inspect --authfile "$REGISTRY_AUTH_FILE" \
+                    "docker://${image_name}:latest" 2>/dev/null \
+                    | jq -r '.Labels["org.opencontainers.image.version"] // empty' || true)
+                  case "$current" in
+                    "${prefix}"*)
+                      current_point=${current#"$prefix"}
+                      case "$current_point" in
+                        ''|*[!0-9]*) ;;
+                        *) if [ "$current_point" -gt "$point" ]; then point=$current_point; fi ;;
+                      esac
+                      ;;
+                  esac
+                  point=$((point + 1))
+
+                  image_version="latest-${fedora}.${today}.${point}"
+
                   if [ "$GITHUB_EVENT_NAME" = "push" ]; then
                     tag="$GITHUB_REF_NAME"
                   else
-                    tag="release-$(TZ=Asia/Shanghai date +%Y.%m.%d.%H%M)"
+                    # 原来是 release-YYYY.MM.DD.HHMM，末尾的时分改成当天构建序号。
+                    tag="release-$(TZ=Asia/Shanghai date +%Y.%m.%d).${point}"
                   fi
                   case "$tag" in
                     release-*|Release-*) ;;
@@ -50,9 +125,11 @@ jobs:
                     exit 1
                   fi
                   echo "version=$tag" >> "$GITHUB_OUTPUT"
+                  echo "image_version=$image_version" >> "$GITHUB_OUTPUT"
                   echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
                   echo "image_tag=$tag" >> "$GITHUB_OUTPUT"
                   echo "image_name=$image_name" >> "$GITHUB_OUTPUT"
+                  echo "Image version: $image_version"
 
     image:
         needs: prepare
@@ -63,6 +140,7 @@ jobs:
         env:
             IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}
             IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+            IMAGE_VERSION: ${{ needs.prepare.outputs.image_version }}
         steps:
             - name: Check out repository
               uses: actions/checkout@v5
@@ -118,9 +196,14 @@ jobs:
                   CLASH_VERGE_RPM_URL: ${{ steps.clash.outputs.url }}
                   V2RAYA_RPM_URL: ${{ steps.v2raya.outputs.url }}
               run: |
+                  revision=$(git rev-parse --short=7 HEAD)
+                  created=$(git log -1 --format=%cI)
                   podman build --pull=always \
                     --build-arg "CLASH_VERGE_RPM_URL=$CLASH_VERGE_RPM_URL" \
                     --build-arg "V2RAYA_RPM_URL=$V2RAYA_RPM_URL" \
+                    --build-arg "BUILD_VERSION=$IMAGE_VERSION" \
+                    --build-arg "BUILD_REVISION=$revision" \
+                    --build-arg "BUILD_CREATED=$created" \
                     --file Containerfile --tag "$IMAGE_NAME:$IMAGE_TAG" .
 
             - name: Rechunk with chunkah
@@ -150,6 +233,15 @@ jobs:
                   podman tag "$chunked" "$IMAGE_NAME:$IMAGE_TAG"
                   echo "Chunked layers: $(podman inspect --format '{{len .RootFS.Layers}}' "$IMAGE_NAME:$IMAGE_TAG")"
 
+            - name: Verify version metadata
+              run: |
+                  # chunkah 会重建 config，这里确认自定义版本号（label 与 os-release）没丢。
+                  set -euo pipefail
+                  label=$(podman inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$IMAGE_NAME:$IMAGE_TAG")
+                  test "$label" = "$IMAGE_VERSION"
+                  podman run --rm "$IMAGE_NAME:$IMAGE_TAG" \
+                    grep -qx "PRETTY_NAME=\"Aurora (Version: ${IMAGE_VERSION})\"" /usr/lib/os-release
+
             - name: Push image
               env:
                   REGISTRY_AUTH_FILE: ${{ runner.temp }}/containers-auth.json
@@ -170,6 +262,9 @@ jobs:
                   }
 
                   push_image "$IMAGE_NAME:$IMAGE_TAG"
+                  # 版本 tag 是「当天构建序号」的唯一载体，下次构建靠它 +1。
+                  podman tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:$IMAGE_VERSION"
+                  push_image "$IMAGE_NAME:$IMAGE_VERSION"
                   podman tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest"
                   push_image "$IMAGE_NAME:latest"
 
@@ -178,6 +273,7 @@ jobs:
                   {
                     echo "### Container image"
                     echo "- Image: \`$IMAGE_NAME:$IMAGE_TAG\`"
+                    echo "- Version: \`$IMAGE_VERSION\`"
                     echo "- Latest: \`$IMAGE_NAME:latest\`"
                   } >> "$GITHUB_STEP_SUMMARY"
 

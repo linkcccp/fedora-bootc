@@ -135,7 +135,26 @@ ls /usr/share/plasma/desktoptheme/Fluent-light
 | `build-test.yml` | push 到 `main`（`Containerfile` / `iso/Containerfile` / `files/` / 脚本 / workflow 变更）；手动 | 仅验证：镜像构建 + chunkah 切层 + `bootc container lint` + 安装器契约（不推送、不建 Release） |
 | `iso.yml` | 推送 `release-*` / `Release-*` 标签；每周一 03:00 UTC（北京时间 11:00）；手动 | 容器镜像 + 内嵌镜像的可离线安装 ISO（分卷发布） |
 
-`iso.yml` 会更新 `ghcr.io/linkcccp/fedora-bootc:latest`。
+`iso.yml` 会更新 `ghcr.io/linkcccp/fedora-bootc:latest`，同时推一个
+`latest-45.<YYYYMMDD>.<N>` 版本 tag（`<N>` 是当天第几次成功构建）。
+
+### 版本号
+
+镜像版本号由本仓库的构建产生，格式与上游 aurora 一致，只是只有 `latest` 一个流：
+
+```
+latest-45.20261127.2
+        │  │        └─ 当天第 2 次成功构建
+        │  └────────── 构建日期（北京时间）
+        └───────────── 基座镜像的 Fedora 大版本（自动从 BASE_IMAGE 读取）
+```
+
+- 序号以仓库里的 `latest-45.<日期>.<N>` tag 计数：每次成功构建推一个，失败的构建不占号
+- `bootc status` 的 `Version` 来自 OCI label `org.opencontainers.image.version`
+- GRUB 标题、`hostnamectl`、fastfetch 来自 `/usr/lib/os-release` 的 `PRETTY_NAME`
+- 上游基座自己的版本另存在 `/usr/share/fedora-bootc/upstream-version`
+- 定时 / 手动触发的 Release tag 是 `release-<YYYY.MM.DD>.<N>`，序号与镜像版本一致
+- 版本号只影响显示，`bootc upgrade` / `rollback` 仍按镜像 digest 与 deployment 顺序判断
 
 ISO 通过 `bootc-image-builder` 的 `bootc-generic-iso` 从 `iso/Containerfile` 构建，
 安装器环境自行定义（Fedora 45 把仓库配置移到了 `/usr/share/dnf5/repos.d`，
@@ -144,12 +163,13 @@ legacy anaconda-iso 读不到仓库，详见 `iso/Containerfile` 顶部注释）
 ### 发布流程
 
 1. 改动推到 `main`，等 `Build test` 全绿（主镜像与安装器容器并行验证）
-2. 打 tag 并推送：
+2. 打 tag 并推送（tag 名可自定义，`release-*` / `Release-*` 即可）：
    ```sh
-   tag="release-$(TZ=Asia/Shanghai date +%Y.%m.%d.%H%M)"
+   tag="release-v1.0.0"
    git tag "$tag"
    git push origin "$tag"
    ```
+   定时与手动触发的构建不需要这一步，`iso.yml` 会自动生成 `release-<日期>.<N>`
 3. `iso.yml` 构建镜像与 ISO，成功后创建 GitHub Release
 
 这样 release tag 只会在构建已经验证通过后产生，避免打 tag 后才发现 Containerfile 报错。
