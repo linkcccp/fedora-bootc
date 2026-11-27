@@ -1,8 +1,13 @@
-# fedora-bootc —— 现在只是 aurora 之上的一层薄定制
+# fedora-bootc —— 现在只是 aurora-dx 之上的一层薄定制
 #
-# 基座：ghcr.io/ublue-os/aurora-nvidia-open:stable
-#   已经自带：Kinoite/KDE、NVIDIA 驱动与 kargs、ffmpeg/mesa 覆盖、Flathub、Bazaar、
-#   podman/flatpak/distrobox/fish 等常用工具。
+# 基座：ghcr.io/ublue-os/aurora-dx-nvidia-open:latest
+#   在 aurora 的基础上自带：Kinoite/KDE、NVIDIA 驱动与 kargs、ffmpeg/mesa 覆盖、
+#   Flathub、Bazaar、podman/flatpak/distrobox/fish 等常用工具。
+#   DX 变体额外提供（本仓库不重复安装）：
+#     - VS Code（MS rpm，装进 /usr/share/code）+ Dev Containers / Remote-SSH 扩展；
+#       skel 里已设 update.mode=none（/usr 只读，VS Code 更新只能靠重建镜像）
+#     - Docker CE（docker.socket 已 enable），与 podman 并存；Dev Containers 默认用它
+#     - incus/libvirt/qemu/virt-manager、Cockpit、bcc/bpftrace/sysprof 等开发工具
 #
 # 这里只加这几样东西：
 #   1. 中文：langpacks-zh_CN + fcitx5 全套 + KDE Wayland 输入法默认值
@@ -15,7 +20,7 @@
 # 切换：
 #   sudo bootc switch ghcr.io/linkcccp/fedora-bootc:latest
 
-ARG BASE_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open:stable
+ARG BASE_IMAGE=ghcr.io/ublue-os/aurora-dx-nvidia-open:latest
 FROM ${BASE_IMAGE}
 
 # bootc 里 /opt 指向 /var/opt，而构建阶段 /var 是 tmpfs：

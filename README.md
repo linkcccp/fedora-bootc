@@ -1,16 +1,16 @@
 # fedora-bootc
 
-基于 [Aurora](https://github.com/ublue-os/aurora) 的个人 KDE 桌面镜像。
+基于 [Aurora](https://github.com/ublue-os/aurora) 的个人 KDE 桌面镜像，用的是开发者变体 **Aurora DX**。
 
-`Containerfile` 只是在官方 aurora 之上加一层薄定制，桌面环境、内核、显卡驱动全部跟随上游，
+`Containerfile` 只是在官方 aurora-dx 之上加一层薄定制，桌面环境、内核、显卡驱动全部跟随上游，
 不再自己维护。
 
 ```dockerfile
-ARG BASE_IMAGE=ghcr.io/ublue-os/aurora-nvidia-open:stable
+ARG BASE_IMAGE=ghcr.io/ublue-os/aurora-dx-nvidia-open:latest
 FROM ${BASE_IMAGE}
 ```
 
-| 由 aurora 提供 | 由本仓库提供 |
+| 由 aurora-dx 提供 | 由本仓库提供 |
 | --- | --- |
 | KDE Plasma（Kinoite 基础） | 中文语言包 + fcitx5 输入法 |
 | NVIDIA 驱动、内核参数、akmods | Clash Verge Rev（GUI + TUN） |
@@ -18,8 +18,10 @@ FROM ${BASE_IMAGE}
 | Flathub、Bazaar、flatpak 预装 | NVIDIA 插电锁频服务 |
 | podman / flatpak / distrobox / fish | Maple Mono、JetBrains Nerd Font |
 | Secure Boot 签名、内核跟随 Fedora | Fluent Light 主题 + Fluent11 图标 + Vimix GRUB 主题 |
+| VS Code（系统级 rpm）+ Dev Containers / Remote-SSH 扩展，skel 已设 `update.mode=none` | |
+| Docker CE（`docker.socket` 已启用，与 podman 并存） | |
 
-> 非 NVIDIA 机器把 `ARG BASE_IMAGE` 改成 `ghcr.io/ublue-os/aurora:stable` 即可。
+> 非 NVIDIA 机器把 `ARG BASE_IMAGE` 改成 `ghcr.io/ublue-os/aurora-dx:latest` 即可。
 
 ## 镜像里加了什么
 
